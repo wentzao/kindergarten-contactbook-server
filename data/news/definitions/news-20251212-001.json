@@ -1,0 +1,34 @@
+{
+    "id": "news-20251212-001",
+    "title": "2025畢業典禮回顧影片",
+    "tag": "榮譽榜",
+    "coverImage": "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=800",
+    "contentBlocks": [
+        {
+            "type": "text",
+            "content": "恭喜2025年畢業班的大班寶貝們！🎓"
+        },
+        {
+            "type": "text",
+            "content": "今年六月的畢業典禮，孩子們展現了最棒的自己。從唱畢業歌、領取畢業證書，到與老師們的擁抱告別，每一刻都令人感動。"
+        },
+        {
+            "type": "video",
+            "url": "https://www.youtube.com/watch?v=-PtXd1myQR0",
+            "caption": "2025 文藻幼兒園畢業典禮完整回顧"
+        },
+        {
+            "type": "text",
+            "content": "感謝家長們三年來的支持與陪伴，祝福所有畢業生在小學生活中繼續發光發熱！"
+        }
+    ],
+    "author": "園長 王文藻",
+    "isPinned": false,
+    "publishAt": "2025-12-12T10:00:00+08:00",
+    "createdAt": "2025-12-11T18:00:00+08:00",
+    "updatedAt": "2025-12-11T18:00:00+08:00",
+    "createdBy": "admin",
+    "surveyId": null,
+    "targetClasses": [],
+    "status": "published"
+}

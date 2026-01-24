@@ -1,0 +1,40 @@
+{
+    "id": "news-20251205-001",
+    "title": "榮譽榜：小太陽班繪畫比賽佳績",
+    "tag": "榮譽榜",
+    "coverImage": "https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=800",
+    "contentBlocks": [
+        {
+            "type": "text",
+            "content": "恭喜小太陽班的寶貝們！🎨"
+        },
+        {
+            "type": "text",
+            "content": "在本屆「高雄市幼兒繪畫比賽」中，我們班級有三位小朋友獲獎："
+        },
+        {
+            "type": "text",
+            "content": "🥇 金獎：王小明 ——《我的家》\n🥈 銀獎：李小華 ——《快樂的周末》\n🎖️ 佳作：陳小美 ——《彩虹》"
+        },
+        {
+            "type": "image",
+            "url": "https://images.unsplash.com/photo-1560421683-6856ea585c78?w=800",
+            "caption": "得獎作品展示"
+        },
+        {
+            "type": "text",
+            "content": "感謝老師們的悉心指導，以及家長們的支持！讓我們一起為孩子們喝采！👏"
+        }
+    ],
+    "author": null,
+    "isPinned": false,
+    "publishAt": "2025-12-05T10:00:00+08:00",
+    "createdAt": "2025-12-04T17:00:00+08:00",
+    "updatedAt": "2025-12-04T17:00:00+08:00",
+    "createdBy": "admin",
+    "surveyId": null,
+    "targetClasses": [
+        "小太陽班"
+    ],
+    "status": "published"
+}

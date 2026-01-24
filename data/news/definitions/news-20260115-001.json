@@ -1,0 +1,38 @@
+{
+    "id": "news-20260115-001",
+    "title": "一月份菜單更新",
+    "tag": "菜單更新",
+    "coverImage": "https://images.unsplash.com/photo-1606787366850-de6330128bfc?w=800",
+    "contentBlocks": [
+        {
+            "type": "text",
+            "content": "親愛的家長您好，"
+        },
+        {
+            "type": "text",
+            "content": "一月份的營養午餐菜單已更新，本月特色包含："
+        },
+        {
+            "type": "text",
+            "content": "• 當季新鮮蔬果\n• 低油低鈉健康烹調\n• 每週一湯品\n• 週五特製點心日"
+        },
+        {
+            "type": "image",
+            "url": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800",
+            "caption": "營養均衡的午餐"
+        },
+        {
+            "type": "text",
+            "content": "如有特殊飲食需求（過敏、素食等），請提前告知導師，我們將為孩子準備替代餐點。"
+        }
+    ],
+    "author": null,
+    "isPinned": false,
+    "publishAt": "2026-01-15T08:00:00+08:00",
+    "createdAt": "2026-01-14T16:00:00+08:00",
+    "updatedAt": "2026-01-14T16:00:00+08:00",
+    "createdBy": "admin",
+    "surveyId": null,
+    "targetClasses": [],
+    "status": "published"
+}

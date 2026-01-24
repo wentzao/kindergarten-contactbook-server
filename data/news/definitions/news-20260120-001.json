@@ -1,0 +1,38 @@
+{
+    "id": "news-20260120-001",
+    "title": "114學年度下學期課後才藝班報名",
+    "tag": "活動通知",
+    "coverImage": "https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=800",
+    "contentBlocks": [
+        {
+            "type": "text",
+            "content": "親愛的家長您好，"
+        },
+        {
+            "type": "text",
+            "content": "為了豐富幼兒的課後生活，本園預計於下學期開設多元才藝課程，包含：創意美術、兒童圍棋、快樂足球、律動舞蹈、積木建構等。"
+        },
+        {
+            "type": "image",
+            "url": "https://images.unsplash.com/photo-1596464716127-f2a82984de30?w=800",
+            "caption": "兒童才藝課程"
+        },
+        {
+            "type": "text",
+            "content": "請您協助填寫意願調查，以利我們安排師資與課程內容。問卷填寫截止日期：2026年1月25日"
+        },
+        {
+            "type": "survey",
+            "surveyId": "s1"
+        }
+    ],
+    "author": null,
+    "isPinned": false,
+    "publishAt": "2026-01-20T08:00:00+08:00",
+    "createdAt": "2026-01-19T16:00:00+08:00",
+    "updatedAt": "2026-01-19T16:00:00+08:00",
+    "createdBy": "admin",
+    "surveyId": "s1",
+    "targetClasses": [],
+    "status": "published"
+}

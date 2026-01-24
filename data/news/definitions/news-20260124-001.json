@@ -1,0 +1,33 @@
+{
+    "id": "news-20260124-001",
+    "title": "電子聯絡簿系統正式上線！",
+    "tag": "重要公告",
+    "coverImage": "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=800",
+    "contentBlocks": [
+        {
+            "type": "text",
+            "content": "親愛的家長們您好，"
+        },
+        {
+            "type": "text",
+            "content": "文藻幼兒園全新的電子聯絡簿系統正式上線了！我們致力於提供更便捷、即時的親師溝通管道，讓您與老師之間的聯繫更加緊密。"
+        },
+        {
+            "type": "text",
+            "content": "透過這個全新的 App，您可以：\n• 每日查看孩子的學習狀況與健康紀錄\n• 即時收到學校公告與活動通知\n• 線上請假、填寫問卷\n• 與老師雙向溝通"
+        },
+        {
+            "type": "text",
+            "content": "感謝您一直以來對文藻幼兒園的支持與信任，讓我們攜手為孩子創造更美好的成長環境！"
+        }
+    ],
+    "author": "園長 王文藻",
+    "isPinned": true,
+    "publishAt": "2026-01-24T08:00:00+08:00",
+    "createdAt": "2026-01-23T15:00:00+08:00",
+    "updatedAt": "2026-01-24T09:00:00+08:00",
+    "createdBy": "admin",
+    "surveyId": null,
+    "targetClasses": [],
+    "status": "published"
+}

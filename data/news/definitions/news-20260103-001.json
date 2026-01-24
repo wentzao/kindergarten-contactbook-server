@@ -1,0 +1,33 @@
+{
+    "id": "news-20260103-001",
+    "title": "新年快樂！開學提醒",
+    "tag": "重要公告",
+    "coverImage": "https://images.unsplash.com/photo-1482517967863-00e15c9b44be?w=800",
+    "contentBlocks": [
+        {
+            "type": "text",
+            "content": "親愛的家長與寶貝們，新年快樂！🎉"
+        },
+        {
+            "type": "text",
+            "content": "2026年第一天上課日為1月3日（週五），請記得："
+        },
+        {
+            "type": "text",
+            "content": "📌 攜帶假期作業（學習單）\n📌 恢復正常作息時間\n📌 檢查書包及文具用品\n📌 帶齊換洗衣物與水壺"
+        },
+        {
+            "type": "text",
+            "content": "歡迎孩子們回到學校，老師很想念大家！期待新的一年，我們一起成長進步。"
+        }
+    ],
+    "author": null,
+    "isPinned": false,
+    "publishAt": "2026-01-03T07:00:00+08:00",
+    "createdAt": "2026-01-02T20:00:00+08:00",
+    "updatedAt": "2026-01-02T20:00:00+08:00",
+    "createdBy": "admin",
+    "surveyId": null,
+    "targetClasses": [],
+    "status": "published"
+}

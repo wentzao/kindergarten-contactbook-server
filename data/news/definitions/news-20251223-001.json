@@ -1,0 +1,29 @@
+{
+    "id": "news-20251223-001",
+    "title": "耶誕節表演活動提醒",
+    "tag": "活動通知",
+    "coverImage": "https://images.unsplash.com/photo-1482517967863-00e15c9b44be?w=800",
+    "contentBlocks": [
+        {
+            "type": "text",
+            "content": "親愛的家長們，本週五（12/25）為本園耶誕節慶祝活動！"
+        },
+        {
+            "type": "text",
+            "content": "活動時間：上午9:00-11:00\n活動地點：學校大禮堂\n請準時到場，為孩子們加油打氣！"
+        },
+        {
+            "type": "text",
+            "content": "📌 請讓孩子穿著學校發放的表演服裝\n📌 可攜帶相機錄影留念\n📌 活動結束後發放耶誕禮物"
+        }
+    ],
+    "author": null,
+    "isPinned": false,
+    "publishAt": "2025-12-23T08:00:00+08:00",
+    "createdAt": "2025-12-22T17:00:00+08:00",
+    "updatedAt": "2025-12-22T17:00:00+08:00",
+    "createdBy": "admin",
+    "surveyId": null,
+    "targetClasses": [],
+    "status": "published"
+}

@@ -1,0 +1,39 @@
+{
+    "id": "news-20251227-001",
+    "title": "耶誕節活動花絮",
+    "tag": "榮譽榜",
+    "coverImage": "https://images.unsplash.com/photo-1512389142860-9c449e58a814?w=800",
+    "contentBlocks": [
+        {
+            "type": "text",
+            "content": "感謝所有家長熱情參與本次耶誕節慶祝活動！🎄"
+        },
+        {
+            "type": "text",
+            "content": "活動當天，孩子們精彩的歌曲表演、舞蹈以及戲劇演出，展現了一學期的學習成果。"
+        },
+        {
+            "type": "image",
+            "url": "https://images.unsplash.com/photo-1513159446162-54eb8bdaa79b?w=800",
+            "caption": "孩子們的精彩表演"
+        },
+        {
+            "type": "image",
+            "url": "https://images.unsplash.com/photo-1543589077-47d81606c1bf?w=800",
+            "caption": "與聖誕老人合影"
+        },
+        {
+            "type": "text",
+            "content": "完整活動照片已上傳至「相簿」功能，歡迎家長下載珍藏！"
+        }
+    ],
+    "author": null,
+    "isPinned": false,
+    "publishAt": "2025-12-27T10:00:00+08:00",
+    "createdAt": "2025-12-26T20:00:00+08:00",
+    "updatedAt": "2025-12-26T20:00:00+08:00",
+    "createdBy": "admin",
+    "surveyId": null,
+    "targetClasses": [],
+    "status": "published"
+}

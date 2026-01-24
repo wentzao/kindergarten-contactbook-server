@@ -1,0 +1,33 @@
+{
+    "id": "news-20260108-001",
+    "title": "寒流來襲，保暖提醒",
+    "tag": "衛教資訊",
+    "coverImage": "https://images.unsplash.com/photo-1516912481808-3406841bd33c?w=800",
+    "contentBlocks": [
+        {
+            "type": "text",
+            "content": "親愛的家長們，"
+        },
+        {
+            "type": "text",
+            "content": "中央氣象署預報本週將有強烈寒流來襲，氣溫可能降至10度以下。請協助孩子做好保暖措施："
+        },
+        {
+            "type": "text",
+            "content": "✅ 洋蔥式穿搭：外套、毛衣、內搭，方便室內調節\n✅ 帽子、圍巾、手套，保護頭部及四肢末端\n✅ 溫熱開水，維持體溫\n✅ 避免劇烈戶外運動，預防呼吸道不適"
+        },
+        {
+            "type": "text",
+            "content": "學校將視天氣狀況調整戶外活動，請家長放心。"
+        }
+    ],
+    "author": "保健老師",
+    "isPinned": false,
+    "publishAt": "2026-01-08T07:30:00+08:00",
+    "createdAt": "2026-01-07T18:00:00+08:00",
+    "updatedAt": "2026-01-07T18:00:00+08:00",
+    "createdBy": "nurse",
+    "surveyId": null,
+    "targetClasses": [],
+    "status": "published"
+}

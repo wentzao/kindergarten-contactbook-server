@@ -1,0 +1,38 @@
+{
+    "id": "news-20251201-001",
+    "title": "十二月主題活動：冬天來了",
+    "tag": "活動通知",
+    "coverImage": "https://images.unsplash.com/photo-1516912481808-3406841bd33c?w=800",
+    "contentBlocks": [
+        {
+            "type": "text",
+            "content": "親愛的家長您好，"
+        },
+        {
+            "type": "text",
+            "content": "十二月份的主題活動是「冬天來了」！我們將透過各種有趣的活動，讓孩子認識冬天的變化與特色。"
+        },
+        {
+            "type": "text",
+            "content": "本月活動預告：\n❄️ 第一週：認識冬天的動物（冬眠、候鳥）\n🧤 第二週：冬季穿搭與保暖\n🎄 第三週：耶誕節慶祝活動\n🧧 第四週：冬至節氣體驗"
+        },
+        {
+            "type": "image",
+            "url": "https://images.unsplash.com/photo-1418985991508-e47386d96a71?w=800",
+            "caption": "冬季景色"
+        },
+        {
+            "type": "text",
+            "content": "請家長協助準備孩子的冬季衣物，並關注每週的聯絡簿說明。"
+        }
+    ],
+    "author": null,
+    "isPinned": false,
+    "publishAt": "2025-12-01T08:00:00+08:00",
+    "createdAt": "2025-11-30T16:00:00+08:00",
+    "updatedAt": "2025-11-30T16:00:00+08:00",
+    "createdBy": "admin",
+    "surveyId": null,
+    "targetClasses": [],
+    "status": "published"
+}

@@ -1,0 +1,34 @@
+{
+    "id": "news-20251218-001",
+    "title": "冬至搓湯圓活動",
+    "tag": "活動通知",
+    "coverImage": "https://images.unsplash.com/photo-1581873372796-635b67ca2008?w=800",
+    "contentBlocks": [
+        {
+            "type": "text",
+            "content": "冬至到，搓湯圓！🧧"
+        },
+        {
+            "type": "text",
+            "content": "本週日（12/21）為冬至，學校將在週五（12/19）舉辦搓湯圓活動，讓孩子們體驗傳統節慶文化。"
+        },
+        {
+            "type": "text",
+            "content": "活動內容：\n• 認識冬至節氣故事\n• 動手搓五彩湯圓\n• 品嚐甜蜜湯圓"
+        },
+        {
+            "type": "image",
+            "url": "https://images.unsplash.com/photo-1464349095431-e9a21285b5f3?w=800",
+            "caption": "往年搓湯圓活動"
+        }
+    ],
+    "author": null,
+    "isPinned": false,
+    "publishAt": "2025-12-18T08:00:00+08:00",
+    "createdAt": "2025-12-17T16:00:00+08:00",
+    "updatedAt": "2025-12-17T16:00:00+08:00",
+    "createdBy": "admin",
+    "surveyId": null,
+    "targetClasses": [],
+    "status": "published"
+}

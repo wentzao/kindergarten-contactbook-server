@@ -1,0 +1,38 @@
+{
+    "id": "news-20260110-001",
+    "title": "親子手作活動：年節裝飾DIY",
+    "tag": "活動通知",
+    "coverImage": "https://images.unsplash.com/photo-1513885535751-8b9238bd345a?w=800",
+    "contentBlocks": [
+        {
+            "type": "text",
+            "content": "文藻幼兒園年度親子活動來囉！🎊"
+        },
+        {
+            "type": "text",
+            "content": "活動時間：2026年1月18日（週六）上午9:00-11:30\n活動地點：學校大禮堂\n活動內容：親子一起製作春節裝飾品（春聯、紅包袋、剪紙等）"
+        },
+        {
+            "type": "image",
+            "url": "https://images.unsplash.com/photo-1582562124811-c09040d0a901?w=800",
+            "caption": "往年親子手作活動"
+        },
+        {
+            "type": "text",
+            "content": "請於1月15日前透過 App 完成報名，名額有限，額滿為止！"
+        },
+        {
+            "type": "survey",
+            "surveyId": "s2"
+        }
+    ],
+    "author": null,
+    "isPinned": false,
+    "publishAt": "2026-01-10T08:00:00+08:00",
+    "createdAt": "2026-01-09T14:00:00+08:00",
+    "updatedAt": "2026-01-09T14:00:00+08:00",
+    "createdBy": "admin",
+    "surveyId": "s2",
+    "targetClasses": [],
+    "status": "published"
+}

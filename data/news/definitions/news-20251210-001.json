@@ -1,0 +1,38 @@
+{
+    "id": "news-20251210-001",
+    "title": "戶外教學：科學工藝博物館",
+    "tag": "活動通知",
+    "coverImage": "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=800",
+    "contentBlocks": [
+        {
+            "type": "text",
+            "content": "親愛的家長您好，"
+        },
+        {
+            "type": "text",
+            "content": "本學期的戶外教學將於12月20日（週五）前往高雄科學工藝博物館參觀。"
+        },
+        {
+            "type": "text",
+            "content": "活動時間：08:30 出發，16:00 返校\n集合地點：學校大門口\n費用：已包含在學期費用中"
+        },
+        {
+            "type": "image",
+            "url": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800",
+            "caption": "科工館兒童科學中心"
+        },
+        {
+            "type": "text",
+            "content": "📌 請準備輕便服裝及運動鞋\n📌 自備水壺及衛生紙\n📌 容易暈車的孩子請提前告知"
+        }
+    ],
+    "author": null,
+    "isPinned": false,
+    "publishAt": "2025-12-10T08:00:00+08:00",
+    "createdAt": "2025-12-09T16:00:00+08:00",
+    "updatedAt": "2025-12-09T16:00:00+08:00",
+    "createdBy": "admin",
+    "surveyId": null,
+    "targetClasses": [],
+    "status": "published"
+}

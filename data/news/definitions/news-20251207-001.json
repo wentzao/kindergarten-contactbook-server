@@ -1,0 +1,38 @@
+{
+    "id": "news-20251207-001",
+    "title": "親職教養講座：正向教養的藝術",
+    "tag": "衛教資訊",
+    "coverImage": "https://images.unsplash.com/photo-1491438590914-bc09fcaaf77a?w=800",
+    "contentBlocks": [
+        {
+            "type": "text",
+            "content": "文藻幼兒園親職教育系列講座 📚"
+        },
+        {
+            "type": "text",
+            "content": "主題：正向教養的藝術——如何與孩子有效溝通\n講師：兒童心理專家 陳老師\n時間：2025年12月14日（週六）上午9:30-11:30\n地點：學校會議室"
+        },
+        {
+            "type": "image",
+            "url": "https://images.unsplash.com/photo-1476234251651-f353703a034d?w=800",
+            "caption": "親子溝通"
+        },
+        {
+            "type": "text",
+            "content": "課程內容：\n• 認識孩子的情緒發展\n• 有效傾聽與同理技巧\n• 建立正向的親子互動模式\n• 實際案例討論與演練"
+        },
+        {
+            "type": "text",
+            "content": "歡迎家長踴躍報名參加！名額有限，請提早報名。"
+        }
+    ],
+    "author": null,
+    "isPinned": false,
+    "publishAt": "2025-12-07T09:00:00+08:00",
+    "createdAt": "2025-12-06T16:00:00+08:00",
+    "updatedAt": "2025-12-06T16:00:00+08:00",
+    "createdBy": "admin",
+    "surveyId": null,
+    "targetClasses": [],
+    "status": "published"
+}

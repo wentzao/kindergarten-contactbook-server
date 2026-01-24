@@ -1,0 +1,29 @@
+{
+    "id": "news-20251220-001",
+    "title": "十二月份菜單公告",
+    "tag": "菜單更新",
+    "coverImage": "https://images.unsplash.com/photo-1493770348161-369560ae357d?w=800",
+    "contentBlocks": [
+        {
+            "type": "text",
+            "content": "親愛的家長您好，"
+        },
+        {
+            "type": "text",
+            "content": "十二月份營養午餐菜單已更新，本月特別加入應景的冬至湯圓甜點！"
+        },
+        {
+            "type": "text",
+            "content": "本月菜色亮點：\n🍲 週一：暖心火鍋日\n🍗 週三：香酥雞腿餐\n🎄 12/25：聖誕特餐"
+        }
+    ],
+    "author": null,
+    "isPinned": false,
+    "publishAt": "2025-12-20T08:00:00+08:00",
+    "createdAt": "2025-12-19T16:00:00+08:00",
+    "updatedAt": "2025-12-19T16:00:00+08:00",
+    "createdBy": "admin",
+    "surveyId": null,
+    "targetClasses": [],
+    "status": "published"
+}
