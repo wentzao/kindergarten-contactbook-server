@@ -1,8 +1,7 @@
 {
     "id": "news-20251212-001",
     "title": "2025畢業典禮回顧影片",
-    "tag": "榮譽榜",
-    "coverImage": "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=800",
+    "tag": "影片回顧",
     "contentBlocks": [
         {
             "type": "text",
@@ -14,7 +13,7 @@
         },
         {
             "type": "video",
-            "url": "https://www.youtube.com/watch?v=d_FEaFgJyfA",
+            "url": "https://www.youtube.com/watch?v=-PtXd1myQR0",
             "caption": "2025 文藻幼兒園畢業典禮完整回顧"
         },
         {
@@ -30,5 +29,6 @@
     "createdBy": "admin",
     "surveyId": null,
     "targetClasses": [],
-    "status": "published"
+    "status": "published",
+    "animation": "confetti"
 }
