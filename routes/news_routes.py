@@ -5,7 +5,7 @@ import json
 
 news_bp = Blueprint('news', __name__)
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
-NEWS_DIR = os.path.join(DATA_DIR, 'news', 'definitions')
+NEWS_DIR = os.path.join(DATA_DIR, 'news')
 
 def get_all_news():
     """Load all news from definitions folder"""
@@ -98,16 +98,21 @@ def list_news():
     for item in paginated:
         # Extract preview text from contentBlocks
         preview = ''
+        first_image = None
         for block in item.get('contentBlocks', []):
-            if block.get('type') == 'text':
+            if block.get('type') == 'text' and not preview:
                 preview = block.get('content', '')[:100]
-                break
+            elif block.get('type') == 'image' and not first_image:
+                first_image = block.get('url')
+        
+        # Use coverImage if set, otherwise fallback to first image in contentBlocks
+        display_image = item.get('coverImage') or first_image
         
         result.append({
             'id': item.get('id'),
             'title': item.get('title'),
             'tag': item.get('tag'),
-            'coverImage': item.get('coverImage'),
+            'coverImage': display_image,
             'preview': preview,
             'author': item.get('author'),
             'isPinned': item.get('isPinned', False),

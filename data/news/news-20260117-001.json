@@ -1,0 +1,25 @@
+{
+    "id": "news-20260117-001",
+    "title": "冬季流感預防須知",
+    "tag": "衛教資訊",
+    "contentBlocks": [
+        {
+            "type": "text",
+            "content": "親愛的家長您好，\n\n冬季是流感好發季節，請協助孩子做好以下防護措施：\n\n✅ 勤洗手，使用肥皂搓洗20秒以上\n✅ 打噴嚏或咳嗽時用手肘遮掩\n✅ 避免用手觸摸眼、口、鼻\n✅ 維持良好作息與均衡飲食\n✅ 若有發燒或呼吸道症狀，請在家休息\n\n若有任何健康疑慮，歡迎隨時與園方聯繫。"
+        },
+        {
+            "type": "link",
+            "url": "https://www.cdc.gov.tw/",
+            "label": "衛福部疾管署 - 更多資訊"
+        }
+    ],
+    "author": "保健老師",
+    "isPinned": false,
+    "publishAt": "2026-01-17T08:00:00+08:00",
+    "createdAt": "2026-01-16T17:00:00+08:00",
+    "updatedAt": "2026-01-16T17:00:00+08:00",
+    "createdBy": "admin",
+    "surveyId": null,
+    "targetClasses": [],
+    "status": "published"
+}

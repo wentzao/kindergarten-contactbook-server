@@ -1,0 +1,25 @@
+{
+    "id": "news-20251215-001",
+    "title": "幼兒牙齒保健宣導",
+    "tag": "衛教資訊",
+    "contentBlocks": [
+        {
+            "type": "text",
+            "content": "親愛的家長您好，\n\n養成良好的口腔衛生習慣對幼兒非常重要。以下是一些保健建議：\n\n🦷 正確刷牙方式：\n• 早晚各刷一次，每次2分鐘\n• 使用適合幼兒的軟毛牙刷\n• 家長協助檢查及補刷\n\n🍭 飲食注意：\n• 減少含糖零食及飲料\n• 用餐後漱口\n• 建議每半年定期牙齒檢查"
+        },
+        {
+            "type": "link",
+            "url": "https://www.mohw.gov.tw/",
+            "label": "衛福部 - 口腔保健專區"
+        }
+    ],
+    "author": "保健老師",
+    "isPinned": false,
+    "publishAt": "2025-12-15T08:00:00+08:00",
+    "createdAt": "2025-12-14T16:00:00+08:00",
+    "updatedAt": "2025-12-14T16:00:00+08:00",
+    "createdBy": "admin",
+    "surveyId": null,
+    "targetClasses": [],
+    "status": "published"
+}
