@@ -1,0 +1,723 @@
+{
+    "studentId": "B225851150",
+    "year": 2025,
+    "month": 12,
+    "records": [
+        {
+            "date": "2025-12-31",
+            "dayOfWeek": "三",
+            "status": "signed",
+            "readAt": "2025-12-31T17:30:00+08:00",
+            "signedAt": "2025-12-31T17:45:00+08:00",
+            "itemsToBring": {
+                "items": [
+                    "替換衣物"
+                ],
+                "checkedItems": [
+                    "替換衣物"
+                ],
+                "checkedAt": "2025-12-31T17:35:00+08:00"
+            },
+            "teacher": {
+                "mood": "🎉",
+                "health": "良好",
+                "appetite": "大吃一頓",
+                "nap": "13:00-14:30",
+                "activities": [
+                    "歲末火鍋圍爐",
+                    "回顧影片欣賞"
+                ],
+                "note": "今天是2025的最後一天！全班一起體驗了「圍爐」吃火鍋（用玩具食材模擬），大家互相說吉祥話，非常有過節氣氛。祝爸爸媽媽新年快樂，明年見！",
+                "updatedAt": "2025-12-31T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": [
+                {
+                    "senderId": "parent_id",
+                    "name": "家長",
+                    "content": "謝謝老師這一年的照顧，新年快樂！",
+                    "createdAt": "2025-12-31T17:45:00+08:00"
+                }
+            ]
+        },
+        {
+            "date": "2025-12-30",
+            "dayOfWeek": "二",
+            "status": "signed",
+            "readAt": "2025-12-30T19:00:00+08:00",
+            "signedAt": "2025-12-30T19:05:00+08:00",
+            "itemsToBring": null,
+            "teacher": {
+                "mood": "😊",
+                "health": "良好",
+                "appetite": "正常",
+                "nap": "13:10-14:30",
+                "activities": [
+                    "大掃除 Cleaning",
+                    "美語課 English"
+                ],
+                "note": "為了迎接新年，今天帶著孩子們進行教室大掃除。寶貝負責擦拭自己的櫃子，做得非常認真，是愛整潔的小天使！",
+                "updatedAt": "2025-12-30T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": []
+        },
+        {
+            "date": "2025-12-29",
+            "dayOfWeek": "一",
+            "status": "signed",
+            "readAt": "2025-12-29T18:15:00+08:00",
+            "signedAt": "2025-12-29T18:30:00+08:00",
+            "itemsToBring": {
+                "items": [
+                    "睡袋",
+                    "室內鞋"
+                ],
+                "checkedItems": [
+                    "睡袋",
+                    "室內鞋"
+                ],
+                "checkedAt": "2025-12-29T08:30:00+08:00"
+            },
+            "teacher": {
+                "mood": "😴",
+                "health": "輕微咳嗽",
+                "appetite": "食量正常",
+                "nap": "12:50-14:50",
+                "activities": [
+                    "週末分享",
+                    "戶外曬太陽"
+                ],
+                "note": "今天天氣回暖，帶孩子們去戶外跑跑。早上有一點乾咳，喝了溫水後有好轉。午睡時間可能因為玩累了，睡得特別久。",
+                "updatedAt": "2025-12-29T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": [
+                {
+                    "senderId": "parent_id",
+                    "name": "家長",
+                    "content": "可能是週末空氣比較差，我們會再觀察咳嗽狀況。",
+                    "createdAt": "2025-12-29T18:30:00+08:00"
+                }
+            ]
+        },
+        {
+            "date": "2025-12-26",
+            "dayOfWeek": "五",
+            "status": "signed",
+            "readAt": "2025-12-26T17:50:00+08:00",
+            "signedAt": "2025-12-26T18:00:00+08:00",
+            "itemsToBring": {
+                "items": [
+                    "牙刷"
+                ],
+                "checkedItems": [
+                    "牙刷"
+                ],
+                "checkedAt": "2025-12-26T17:55:00+08:00"
+            },
+            "returnedItems": [
+                "睡袋",
+                "室內鞋",
+                "聖誕作品"
+            ],
+            "teacher": {
+                "mood": "😊",
+                "health": "良好",
+                "appetite": "全部吃完",
+                "nap": "13:00-14:30",
+                "activities": [
+                    "玩具分享日",
+                    "整理儀容"
+                ],
+                "note": "聖誕節過後，孩子們還沉浸在快樂的氣氛中。今天帶回了聖誕節做的雪人勞作，請家長回家欣賞喔！週末愉快！",
+                "updatedAt": "2025-12-26T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": []
+        },
+        {
+            "date": "2025-12-25",
+            "dayOfWeek": "四",
+            "status": "signed",
+            "readAt": "2025-12-25T19:30:00+08:00",
+            "signedAt": "2025-12-25T19:45:00+08:00",
+            "itemsToBring": {
+                "items": [
+                    "聖誕裝扮配件"
+                ],
+                "checkedItems": [
+                    "聖誕裝扮配件"
+                ],
+                "checkedAt": "2025-12-25T08:20:00+08:00"
+            },
+            "teacher": {
+                "mood": "🎄",
+                "health": "興奮",
+                "appetite": "吃點心吃很飽",
+                "nap": "13:30-14:30",
+                "activities": [
+                    "聖誕派對 Party",
+                    "交換禮物"
+                ],
+                "note": "Merry Christmas! 今天寶貝的麋鹿裝扮太可愛了！在交換禮物環節非常有禮貌，拿到禮物時有大聲說謝謝。下午吃了學校準備的聖誕蛋糕。",
+                "updatedAt": "2025-12-25T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": [
+                {
+                    "senderId": "parent_id",
+                    "name": "家長",
+                    "content": "看到照片很開心！謝謝老師辛苦籌備活動！",
+                    "createdAt": "2025-12-25T19:45:00+08:00"
+                }
+            ]
+        },
+        {
+            "date": "2025-12-24",
+            "dayOfWeek": "三",
+            "status": "signed",
+            "readAt": "2025-12-24T18:00:00+08:00",
+            "signedAt": "2025-12-24T18:10:00+08:00",
+            "itemsToBring": null,
+            "attachedItems": [
+                "平安夜蘋果"
+            ],
+            "teacher": {
+                "mood": "😄",
+                "health": "良好",
+                "appetite": "正常",
+                "nap": "13:00-14:30",
+                "activities": [
+                    "製作聖誕襪",
+                    "聽故事"
+                ],
+                "note": "今天是平安夜，學校發了一顆大蘋果（平平安安）。我們製作了明天要裝禮物的聖誕襪，寶貝堅持要畫藍色的聖誕老公公，很有想法！",
+                "updatedAt": "2025-12-24T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": []
+        },
+        {
+            "date": "2025-12-23",
+            "dayOfWeek": "二",
+            "status": "signed",
+            "readAt": "2025-12-23T20:00:00+08:00",
+            "signedAt": "2025-12-23T20:05:00+08:00",
+            "itemsToBring": null,
+            "teacher": {
+                "mood": "😊",
+                "health": "良好",
+                "appetite": "正常",
+                "nap": "13:05-14:25",
+                "activities": [
+                    "派對彩排",
+                    "美語歌曲練習"
+                ],
+                "note": "為了週四的派對進行最後彩排，寶貝記動作記得很清楚。美語課練習唱 \"Jingle Bells\"，回家可能會哼給你們聽喔！",
+                "updatedAt": "2025-12-23T16:30:00+08:00",
+                "updatedBy": "Teacher Pennylin"
+            },
+            "comments": [
+                {
+                    "senderId": "parent_id",
+                    "name": "家長",
+                    "content": "他在洗澡時真的有在唱Jingle Bells XD",
+                    "createdAt": "2025-12-23T20:05:00+08:00"
+                }
+            ]
+        },
+        {
+            "date": "2025-12-22",
+            "dayOfWeek": "一",
+            "status": "signed",
+            "readAt": "2025-12-22T17:40:00+08:00",
+            "signedAt": "2025-12-22T17:45:00+08:00",
+            "itemsToBring": {
+                "items": [
+                    "睡袋",
+                    "室內鞋"
+                ],
+                "checkedItems": [
+                    "睡袋",
+                    "室內鞋"
+                ],
+                "checkedAt": "2025-12-22T08:25:00+08:00"
+            },
+            "teacher": {
+                "mood": "😋",
+                "health": "良好",
+                "appetite": "全部吃完",
+                "nap": "13:00-14:30",
+                "activities": [
+                    "冬至主題",
+                    "黏土湯圓"
+                ],
+                "note": "昨天是冬至，今天學校點心特別準備了小湯圓。我們也用紅白黏土搓湯圓，寶貝說：「吃了一顆就會長大一歲喔！」",
+                "updatedAt": "2025-12-22T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": []
+        },
+        {
+            "date": "2025-12-19",
+            "dayOfWeek": "五",
+            "status": "signed",
+            "readAt": "2025-12-19T18:30:00+08:00",
+            "signedAt": "2025-12-19T18:35:00+08:00",
+            "itemsToBring": {
+                "items": [
+                    "濕紙巾"
+                ],
+                "checkedItems": [
+                    "濕紙巾"
+                ],
+                "checkedAt": "2025-12-19T18:32:00+08:00"
+            },
+            "returnedItems": [
+                "睡袋",
+                "餐袋"
+            ],
+            "teacher": {
+                "mood": "😄",
+                "health": "良好",
+                "appetite": "正常",
+                "nap": "13:00-14:30",
+                "activities": [
+                    "體能循環 Games",
+                    "角落活動"
+                ],
+                "note": "這週天氣明顯變冷了，但孩子們活動力依然旺盛。體能課跑得滿頭大汗，老師有協助墊背巾吸汗。週末氣溫較低，請注意保暖。",
+                "updatedAt": "2025-12-19T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": [
+                {
+                    "senderId": "parent_id",
+                    "name": "家長",
+                    "content": "好的，謝謝老師提醒。",
+                    "createdAt": "2025-12-19T18:35:00+08:00"
+                }
+            ]
+        },
+        {
+            "date": "2025-12-18",
+            "dayOfWeek": "四",
+            "status": "signed",
+            "readAt": "2025-12-18T19:10:00+08:00",
+            "signedAt": "2025-12-18T19:15:00+08:00",
+            "itemsToBring": null,
+            "teacher": {
+                "mood": "😐",
+                "health": "流鼻水",
+                "appetite": "吃得較慢",
+                "nap": "13:00-14:30",
+                "activities": [
+                    "科學實驗",
+                    "積木區"
+                ],
+                "note": "今天早上鼻子過敏比較嚴重，流了一些鼻水，但沒有發燒。午餐因為鼻塞吃得比較慢，老師有鼓勵慢慢吃沒關係。",
+                "updatedAt": "2025-12-18T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": [
+                {
+                    "senderId": "parent_id",
+                    "name": "家長",
+                    "content": "這幾天溫差大，過敏又犯了，辛苦老師照顧。",
+                    "createdAt": "2025-12-18T19:15:00+08:00"
+                }
+            ]
+        },
+        {
+            "date": "2025-12-17",
+            "dayOfWeek": "三",
+            "status": "signed",
+            "readAt": "2025-12-17T18:00:00+08:00",
+            "signedAt": "2025-12-17T18:02:00+08:00",
+            "itemsToBring": null,
+            "teacher": {
+                "mood": "😊",
+                "health": "良好",
+                "appetite": "正常",
+                "nap": "13:10-14:40",
+                "activities": [
+                    "藝術創作 Art",
+                    "繪本導讀"
+                ],
+                "note": "今天用松果做裝飾，寶貝塗上了很多金色的顏料，說要送給媽媽。閱讀時間很專注地看了一本關於北極熊的書。",
+                "updatedAt": "2025-12-17T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": []
+        },
+        {
+            "date": "2025-12-16",
+            "dayOfWeek": "二",
+            "status": "signed",
+            "readAt": "2025-12-16T19:50:00+08:00",
+            "signedAt": "2025-12-16T19:55:00+08:00",
+            "itemsToBring": {
+                "items": [
+                    "衛生紙"
+                ],
+                "checkedItems": [],
+                "checkedAt": null
+            },
+            "teacher": {
+                "mood": "😀",
+                "health": "良好",
+                "appetite": "全部吃完",
+                "nap": "12:55-14:25",
+                "activities": [
+                    "美語課 English",
+                    "角色扮演"
+                ],
+                "note": "在娃娃家扮演醫生，很細心地幫玩偶聽診打針。美語課學了雪人(Snowman)的單字。",
+                "updatedAt": "2025-12-16T16:30:00+08:00",
+                "updatedBy": "Teacher Pennylin"
+            },
+            "comments": []
+        },
+        {
+            "date": "2025-12-15",
+            "dayOfWeek": "一",
+            "status": "signed",
+            "readAt": "2025-12-15T18:20:00+08:00",
+            "signedAt": "2025-12-15T18:25:00+08:00",
+            "itemsToBring": {
+                "items": [
+                    "睡袋",
+                    "室內鞋"
+                ],
+                "checkedItems": [
+                    "睡袋",
+                    "室內鞋"
+                ],
+                "checkedAt": "2025-12-15T08:35:00+08:00"
+            },
+            "teacher": {
+                "mood": "😊",
+                "health": "良好",
+                "appetite": "正常",
+                "nap": "13:00-14:30",
+                "activities": [
+                    "週末分享",
+                    "聖誕佈置"
+                ],
+                "note": "今天開始佈置教室的聖誕樹，寶貝幫忙掛上了彩球。分享時間說週末去看了很漂亮的燈會。",
+                "updatedAt": "2025-12-15T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": []
+        },
+        {
+            "date": "2025-12-12",
+            "dayOfWeek": "五",
+            "status": "signed",
+            "readAt": "2025-12-12T17:30:00+08:00",
+            "signedAt": "2025-12-12T17:40:00+08:00",
+            "itemsToBring": null,
+            "returnedItems": [
+                "睡袋",
+                "牙刷"
+            ],
+            "teacher": {
+                "mood": "🎉",
+                "health": "良好",
+                "appetite": "全部吃完",
+                "nap": "13:00-14:30",
+                "activities": [
+                    "戶外遊戲",
+                    "奧福音樂"
+                ],
+                "note": "今天天氣很好，我們在操場玩了很久。音樂課練習了叮叮噹的節奏敲擊。週末愉快！",
+                "updatedAt": "2025-12-12T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": [
+                {
+                    "senderId": "parent_id",
+                    "name": "家長",
+                    "content": "週末愉快！",
+                    "createdAt": "2025-12-12T17:40:00+08:00"
+                }
+            ]
+        },
+        {
+            "date": "2025-12-11",
+            "dayOfWeek": "四",
+            "status": "signed",
+            "readAt": "2025-12-11T19:00:00+08:00",
+            "signedAt": "2025-12-11T19:05:00+08:00",
+            "itemsToBring": {
+                "items": [
+                    "口罩"
+                ],
+                "checkedItems": [
+                    "口罩"
+                ],
+                "checkedAt": "2025-12-11T08:30:00+08:00"
+            },
+            "teacher": {
+                "mood": "😊",
+                "health": "良好",
+                "appetite": "正常",
+                "nap": "13:10-14:40",
+                "activities": [
+                    "體能活動 PE",
+                    "數字遊戲"
+                ],
+                "note": "今天進行了跳箱子的遊戲，訓練腿部肌力。寶貝一開始有點不敢跳，後來成功了非常有成就感！",
+                "updatedAt": "2025-12-11T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": []
+        },
+        {
+            "date": "2025-12-10",
+            "dayOfWeek": "三",
+            "status": "signed",
+            "readAt": "2025-12-10T18:10:00+08:00",
+            "signedAt": "2025-12-10T18:15:00+08:00",
+            "itemsToBring": null,
+            "teacher": {
+                "mood": "😄",
+                "health": "良好",
+                "appetite": "食慾佳",
+                "nap": "13:00-14:30",
+                "activities": [
+                    "主題探索 Theme",
+                    "烹飪小教室"
+                ],
+                "note": "今天的主題是「溫暖的冬天」，我們嘗試泡了熱可可（微糖），大家喝完嘴巴都有一圈鬍子，很可愛！",
+                "updatedAt": "2025-12-10T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": [
+                {
+                    "senderId": "parent_id",
+                    "name": "家長",
+                    "content": "回家一直說熱可可很好喝，謝謝老師給他們這麼棒的體驗。",
+                    "createdAt": "2025-12-10T18:15:00+08:00"
+                }
+            ]
+        },
+        {
+            "date": "2025-12-09",
+            "dayOfWeek": "二",
+            "status": "signed",
+            "readAt": "2025-12-09T20:15:00+08:00",
+            "signedAt": "2025-12-09T20:20:00+08:00",
+            "itemsToBring": null,
+            "teacher": {
+                "mood": "😊",
+                "health": "良好",
+                "appetite": "挑食",
+                "nap": "13:00-14:30",
+                "activities": [
+                    "美語課 English",
+                    "益智積木"
+                ],
+                "note": "午餐有青椒，寶貝把它們挑到旁邊，老師鼓勵後吃了一小口。美語課學習了 Winter(冬天) 和 Cold(冷)。",
+                "updatedAt": "2025-12-09T16:30:00+08:00",
+                "updatedBy": "Teacher Pennylin"
+            },
+            "comments": []
+        },
+        {
+            "date": "2025-12-08",
+            "dayOfWeek": "一",
+            "status": "signed",
+            "readAt": "2025-12-08T18:00:00+08:00",
+            "signedAt": "2025-12-08T18:10:00+08:00",
+            "itemsToBring": {
+                "items": [
+                    "睡袋",
+                    "室內鞋"
+                ],
+                "checkedItems": [
+                    "睡袋",
+                    "室內鞋"
+                ],
+                "checkedAt": "2025-12-08T08:20:00+08:00"
+            },
+            "teacher": {
+                "mood": "😊",
+                "health": "良好",
+                "appetite": "正常",
+                "nap": "13:00-14:30",
+                "activities": [
+                    "衛生檢查",
+                    "戶外散步"
+                ],
+                "note": "新的一週，檢查了大家的手指甲，寶貝修剪得很乾淨，很棒！趁著中午有陽光去校園散步。",
+                "updatedAt": "2025-12-08T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": []
+        },
+        {
+            "date": "2025-12-05",
+            "dayOfWeek": "五",
+            "status": "signed",
+            "readAt": "2025-12-05T17:45:00+08:00",
+            "signedAt": "2025-12-05T18:00:00+08:00",
+            "itemsToBring": {
+                "items": [
+                    "備用長褲"
+                ],
+                "checkedItems": [
+                    "備用長褲"
+                ],
+                "checkedAt": "2025-12-05T17:50:00+08:00"
+            },
+            "returnedItems": [
+                "睡袋",
+                "漱口杯"
+            ],
+            "teacher": {
+                "mood": "😄",
+                "health": "良好",
+                "appetite": "全部吃完",
+                "nap": "13:00-14:30",
+                "activities": [
+                    "每週回顧",
+                    "音樂律動"
+                ],
+                "note": "這週進入12月，我們教了「洋蔥式穿法」，寶貝很會自己穿脫背心。週末請協助清洗睡袋與漱口杯。",
+                "updatedAt": "2025-12-05T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": [
+                {
+                    "senderId": "parent_id",
+                    "name": "家長",
+                    "content": "最近真的變冷了，會注意保暖。",
+                    "createdAt": "2025-12-05T18:00:00+08:00"
+                }
+            ]
+        },
+        {
+            "date": "2025-12-04",
+            "dayOfWeek": "四",
+            "status": "signed",
+            "readAt": "2025-12-04T19:20:00+08:00",
+            "signedAt": "2025-12-04T19:25:00+08:00",
+            "itemsToBring": null,
+            "teacher": {
+                "mood": "😊",
+                "health": "良好",
+                "appetite": "正常",
+                "nap": "13:10-14:40",
+                "activities": [
+                    "體能課 PE",
+                    "生活自理"
+                ],
+                "note": "體能課玩大龍球，兩人一組合作推球，寶貝很懂得配合同學的速度。練習摺棉被時也很細心。",
+                "updatedAt": "2025-12-04T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": []
+        },
+        {
+            "date": "2025-12-03",
+            "dayOfWeek": "三",
+            "status": "signed",
+            "readAt": "2025-12-03T18:00:00+08:00",
+            "signedAt": "2025-12-03T18:05:00+08:00",
+            "itemsToBring": null,
+            "teacher": {
+                "mood": "😐",
+                "health": "肚子不舒服",
+                "appetite": "吃一半",
+                "nap": "12:50-14:50",
+                "activities": [
+                    "主題教學 Theme",
+                    "安靜閱讀"
+                ],
+                "note": "早上說肚子稍微有點痛，去上廁所後有改善。午餐比較沒胃口，只吃了一半。下午精神還不錯，但體能活動讓他暫停休息。",
+                "updatedAt": "2025-12-03T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": [
+                {
+                    "senderId": "parent_id",
+                    "name": "家長",
+                    "content": "回家後食慾正常了，可能是早餐奶茶喝太快。",
+                    "createdAt": "2025-12-03T18:05:00+08:00"
+                }
+            ]
+        },
+        {
+            "date": "2025-12-02",
+            "dayOfWeek": "二",
+            "status": "signed",
+            "readAt": "2025-12-02T20:00:00+08:00",
+            "signedAt": "2025-12-02T20:10:00+08:00",
+            "itemsToBring": {
+                "items": [
+                    "濕紙巾"
+                ],
+                "checkedItems": [],
+                "checkedAt": null
+            },
+            "teacher": {
+                "mood": "😀",
+                "health": "良好",
+                "appetite": "正常",
+                "nap": "13:00-14:30",
+                "activities": [
+                    "美語課 English",
+                    "藝術欣賞"
+                ],
+                "note": "美語課唱跳很投入！藝術欣賞看了梵谷的「星空」，寶貝說看起來像風在轉圈圈。",
+                "updatedAt": "2025-12-02T16:30:00+08:00",
+                "updatedBy": "Teacher Pennylin"
+            },
+            "comments": []
+        },
+        {
+            "date": "2025-12-01",
+            "dayOfWeek": "一",
+            "status": "signed",
+            "readAt": "2025-12-01T17:55:00+08:00",
+            "signedAt": "2025-12-01T18:00:00+08:00",
+            "itemsToBring": {
+                "items": [
+                    "睡袋",
+                    "室內鞋"
+                ],
+                "checkedItems": [
+                    "睡袋",
+                    "室內鞋"
+                ],
+                "checkedAt": "2025-12-01T08:30:00+08:00"
+            },
+            "teacher": {
+                "mood": "😊",
+                "health": "良好",
+                "appetite": "正常",
+                "nap": "13:00-14:30",
+                "activities": [
+                    "12月慶生會",
+                    "戶外遊戲"
+                ],
+                "note": "12月的第一天，學校舉辦了慶生會，雖然寶貝不是壽星，但也開心地吃了蛋糕，還畫了卡片送給壽星同學。",
+                "updatedAt": "2025-12-01T16:30:00+08:00",
+                "updatedBy": "Teacher Roy"
+            },
+            "comments": [
+                {
+                    "senderId": "parent_id",
+                    "name": "家長",
+                    "content": "這個月感覺活動很多，期待！",
+                    "createdAt": "2025-12-01T18:00:00+08:00"
+                }
+            ]
+        }
+    ],
+    "metadata": {
+        "lastModified": "2026-01-21T12:05:49.122416"
+    }
+}

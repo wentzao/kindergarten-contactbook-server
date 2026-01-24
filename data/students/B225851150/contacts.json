@@ -1,0 +1,17 @@
+{
+    "studentId": "B225851150",
+    "guardians": [
+        {
+            "lineUserId": "Uba57d14ec00dc9357ee54bfb73fcbb27",
+            "devices": [
+                {
+                    "pushToken": "ExponentPushToken[test-token-001]",
+                    "platform": "ios",
+                    "lastActiveAt": "2026-01-17T20:00:00+08:00"
+                }
+            ],
+            "notificationEnabled": true,
+            "linkedAt": "2026-01-01T10:00:00+08:00"
+        }
+    ]
+}

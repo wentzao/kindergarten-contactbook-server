@@ -1,0 +1,98 @@
+{
+    "id": "s2",
+    "title": "功能完整展示問卷",
+    "description": "這是一個測試問卷，用於展示所有可用的題型與功能。This survey showcases all available question types including text, choice, rating, images, and dividers.",
+    "dueDate": "2026-12-31",
+    "targetClasses": [
+        "Star 3"
+    ],
+    "questions": [
+        {
+            "id": "q1",
+            "type": "info",
+            "text": "歡迎來到功能展示問卷！本問卷旨在測試所有前端渲染元件的樣式與功能正確性。Welcome to the feature showcase!"
+        },
+        {
+            "id": "div1",
+            "type": "divider",
+            "label": "文字輸入測試 / Text Inputs"
+        },
+        {
+            "id": "q2",
+            "type": "text",
+            "text": "單行文字輸入 (Single Line)",
+            "required": true,
+            "placeholder": "請輸入簡短文字...",
+            "maxLength": 20
+        },
+        {
+            "id": "q3",
+            "type": "text",
+            "text": "多行文字輸入 (Multi Line)",
+            "required": false,
+            "placeholder": "請輸入較長的文字內容，測試自動換行與鍵盤避讓效果...",
+            "maxLength": 200
+        },
+        {
+            "id": "div2",
+            "type": "divider",
+            "label": "選擇與評分 / Choices & Rating"
+        },
+        {
+            "id": "q4",
+            "type": "choice",
+            "text": "單選題測試 (Single Choice)",
+            "required": true,
+            "options": [
+                "選項 A (Option A)",
+                "選項 B (Option B)",
+                "選項 C (Option C)"
+            ]
+        },
+        {
+            "id": "q5",
+            "type": "multi-choice",
+            "text": "複選題測試 (Multi Choice)",
+            "required": false,
+            "options": [
+                "功能 A (Feature A)",
+                "功能 B (Feature B)",
+                "功能 C (Feature C)",
+                "功能 D (Feature D)"
+            ]
+        },
+        {
+            "id": "q6",
+            "type": "rating",
+            "text": "評分元件測試 (Rating)",
+            "required": true
+        },
+        {
+            "id": "div3",
+            "type": "divider",
+            "label": "圖片展示 / Image Display"
+        },
+        {
+            "id": "img1",
+            "type": "image",
+            "url": "https://picsum.photos/400/400",
+            "caption": "1:1 方形圖片 (Square Image) - 點擊可放大"
+        },
+        {
+            "id": "img2",
+            "type": "image",
+            "url": "https://picsum.photos/800/300",
+            "caption": "橫幅寬圖片 (Banner Image) - 點擊可放大"
+        },
+        {
+            "id": "div4",
+            "type": "divider",
+            "label": "結尾 / Conclusion"
+        },
+        {
+            "id": "info2",
+            "type": "info",
+            "text": "感謝您的測試！請嘗試點擊下方的「送出」按鈕，並測試再次進入時的狀態。Thank you for testing!"
+        }
+    ]
+}

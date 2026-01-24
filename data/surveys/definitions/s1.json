@@ -1,0 +1,55 @@
+{
+    "id": "s1",
+    "title": "114學年度下學期課後才藝",
+    "description": "親愛的家長您好，為了豐富幼兒的課後生活，本園預計於下學期開設多元才藝課程。請您協助填寫意願調查，以利我們安排師資與課程內容。",
+    "dueDate": "2026-01-25",
+    "targetClasses": [],
+    "questions": [
+        {
+            "id": "q1",
+            "type": "choice",
+            "text": "請問您是否有意願讓孩子參加課後才藝班？",
+            "options": [
+                "是",
+                "否"
+            ],
+            "required": true
+        },
+        {
+            "id": "info1",
+            "type": "info",
+            "text": "以下為本學期規劃的才藝課程，請依據孩子興趣選擇。每項課程皆由專業師資授課，課程費用將於選課確認後另行通知。",
+            "style": "note"
+        },
+        {
+            "id": "img1",
+            "type": "image",
+            "url": "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=800"
+        },
+        {
+            "id": "q2",
+            "type": "multi-choice",
+            "text": "若參加，您感興趣的課程有哪些？(可複選)",
+            "options": [
+                "創意美術",
+                "兒童圍棋",
+                "快樂足球",
+                "律動舞蹈",
+                "積木建構"
+            ],
+            "required": false
+        },
+        {
+            "id": "div1",
+            "type": "divider",
+            "label": "其他意見"
+        },
+        {
+            "id": "q3",
+            "type": "text",
+            "text": "對於才藝課程有任何建議或想開設/增加的項目嗎？",
+            "required": false,
+            "placeholder": "請輸入您的建議..."
+        }
+    ]
+}
