@@ -9,6 +9,32 @@ def get_student_contact_book_path(student_id, year, month):
     """Get path to contact book JSON file"""
     return os.path.join(DATA_DIR, 'students', student_id, 'contact-book', str(year), f'{month:02d}.json')
 
+@contact_book_bp.route('/<student_id>/months', methods=['GET'])
+def get_available_months(student_id):
+    """Get list of available months for a student's contact book"""
+    print(f"[CONTACT_BOOK MONTHS] student_id={student_id}")
+    
+    student_dir = os.path.join(DATA_DIR, 'students', student_id, 'contact-book')
+    
+    if not os.path.exists(student_dir):
+        return jsonify([]), 200
+    
+    months = []
+    
+    # Iterate through years and months
+    for year_dir in sorted(os.listdir(student_dir)):
+        year_path = os.path.join(student_dir, year_dir)
+        if not os.path.isdir(year_path):
+            continue
+        for month_file in sorted(os.listdir(year_path)):
+            if not month_file.endswith('.json'):
+                continue
+            month_num = month_file.replace('.json', '')
+            months.append(f"{year_dir}-{month_num}")
+    
+    print(f"[CONTACT_BOOK MONTHS] Found {len(months)} months: {months}")
+    return jsonify(months), 200
+
 @contact_book_bp.route('/<student_id>/<int:year>/<int:month>', methods=['GET'])
 def get_contact_book(student_id, year, month):
     """
