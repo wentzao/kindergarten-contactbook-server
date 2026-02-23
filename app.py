@@ -23,12 +23,16 @@ from routes.med_routes import med_bp
 from routes.survey_routes import survey_bp
 from routes.contact_book_routes import contact_book_bp
 from routes.news_routes import news_bp
+from routes.auth_routes import auth_bp
+from routes.student_routes import student_bp
 
 app.register_blueprint(leave_bp, url_prefix='/api/leave')
 app.register_blueprint(med_bp, url_prefix='/api/meds')
 app.register_blueprint(survey_bp, url_prefix='/api/survey')
 app.register_blueprint(contact_book_bp, url_prefix='/api/contact-book')
 app.register_blueprint(news_bp, url_prefix='/api/news')
+app.register_blueprint(auth_bp, url_prefix='/api/auth')
+app.register_blueprint(student_bp, url_prefix='/api/teacher')
 
 # Request logging middleware
 @app.before_request
