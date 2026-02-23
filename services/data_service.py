@@ -1,5 +1,6 @@
 import os
 import json
+import sqlite3
 from datetime import datetime
 
 class DataService:
@@ -19,39 +20,13 @@ class DataService:
     }
     
     def __init__(self, data_dir):
-        self.data_dir = data_dir
+        # We don't use data_dir much anymore, but keep it for config
+        self.db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'kindergarten.db')
 
-    def _ensure_dir(self, path):
-        os.makedirs(path, exist_ok=True)
-
-    def _get_centralized_file_path(self, data_type, timeframe=None):
-        """Get path for centralized data file: data/leave/YYYYMM.json or data/meds/YYYYMM.json"""
-        if not timeframe:
-            timeframe = datetime.now().strftime('%Y%m')
-            
-        base_dir = os.path.join(self.data_dir, data_type)
-        self._ensure_dir(base_dir)
-        return os.path.join(base_dir, f"{timeframe}.json")
-
-    def _get_student_file_path(self, child_id, data_type):
-        """Get path for individual student file: data/students/{child_id}/leave.json (single file)"""
-        base_dir = os.path.join(self.data_dir, 'students', child_id)
-        self._ensure_dir(base_dir)
-        return os.path.join(base_dir, f"{data_type}.json")
-
-    def _get_survey_def_path(self, survey_id=None):
-        # Path: data/surveys/definitions/{survey_id}.json
-        base_dir = os.path.join(self.data_dir, 'surveys', 'definitions')
-        self._ensure_dir(base_dir)
-        if survey_id:
-            return os.path.join(base_dir, f"{survey_id}.json")
-        return base_dir
-
-    def _get_survey_response_path(self, survey_id):
-        # Path: data/surveys/responses/{survey_id}.json
-        base_dir = os.path.join(self.data_dir, 'surveys', 'responses')
-        self._ensure_dir(base_dir)
-        return os.path.join(base_dir, f"{survey_id}.json")
+    def get_db(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
 
     def _translate_type(self, data_type, type_value):
         """Translate type value from English to Chinese"""
@@ -62,210 +37,187 @@ class DataService:
         return type_value
 
     def save_student_record(self, child_id, data_type, record):
-        """Save record to both centralized and individual student files"""
-        # Add metadata
+        """Save leave or med record to DB"""
         if 'id' not in record:
             record['id'] = f"{int(datetime.now().timestamp() * 1000)}"
         
         if 'createdAt' not in record:
             record['createdAt'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        # Translate type to Chinese and replace the original type field
         if 'type' in record:
             record['type'] = self._translate_type(data_type, record['type'])
         
-        # Remove status field if present (no approval workflow needed)
         if 'status' in record:
             del record['status']
-        
-        # 1. Save to centralized file (e.g., data/leave/202601.json)
-        centralized_path = self._get_centralized_file_path(data_type)
-        self._save_to_file(centralized_path, record)
-        print(f"[DATA_SERVICE] Saved to centralized: {centralized_path}")
-        
-        # 2. Save to individual student file (e.g., data/students/{id}/leave.json - single file)
-        student_path = self._get_student_file_path(child_id, data_type)
-        self._save_to_file(student_path, record)
-        print(f"[DATA_SERVICE] Saved to student folder: {student_path}")
-        
+
+        conn = self.get_db()
+        try:
+            if data_type == 'leave':
+                conn.execute('''
+                    INSERT INTO leave_records (id, child_id, type, start_date, end_date, reason, created_by, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    record.get('id'), child_id, record.get('type'), record.get('startDate'),
+                    record.get('endDate'), record.get('reason'), record.get('createdBy'),
+                    record.get('createdAt')
+                ))
+            elif data_type == 'meds':
+                med_details = {k: v for k, v in record.items() if k not in 
+                               ['id', 'childId', 'type', 'startDate', 'endDate', 'reason', 'createdBy', 'createdAt']}
+                conn.execute('''
+                    INSERT INTO med_records (id, child_id, type, start_date, end_date, reason, created_by, created_at, medication_details)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    record.get('id'), child_id, record.get('type'), record.get('startDate'),
+                    record.get('endDate'), record.get('reason'), record.get('createdBy'),
+                    record.get('createdAt'), json.dumps(med_details, ensure_ascii=False)
+                ))
+            conn.commit()
+            print(f"[DATA_SERVICE] Saved {data_type} record {record['id']} to DB")
+        finally:
+            conn.close()
+            
         return record
 
-    def _save_to_file(self, file_path, record):
-        """Helper to append record to a JSON file"""
-        data = []
-        if os.path.exists(file_path):
-            with open(file_path, 'r', encoding='utf-8') as f:
-                try:
-                    data = json.load(f)
-                except json.JSONDecodeError:
-                    data = []
-
-        data.append(record)
-
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
     def get_student_records(self, child_id, data_type, timeframe=None):
-        """Get records from individual student folder (single file, ignore timeframe)"""
-        file_path = self._get_student_file_path(child_id, data_type)
-        if os.path.exists(file_path):
-             with open(file_path, 'r', encoding='utf-8') as f:
-                try:
-                    return json.load(f)
-                except json.JSONDecodeError:
-                    return []
+        """Get records from DB"""
+        conn = self.get_db()
+        try:
+            if data_type == 'leave':
+                rows = conn.execute('SELECT * FROM leave_records WHERE child_id = ? ORDER BY created_at DESC', (child_id,)).fetchall()
+                records = []
+                for r in rows:
+                    records.append({
+                        'id': r['id'], 'childId': r['child_id'], 'type': r['type'],
+                        'startDate': r['start_date'], 'endDate': r['end_date'],
+                        'reason': r['reason'], 'createdBy': r['created_by'], 'createdAt': r['created_at']
+                    })
+                return records
+            elif data_type == 'meds':
+                rows = conn.execute('SELECT * FROM med_records WHERE child_id = ? ORDER BY created_at DESC', (child_id,)).fetchall()
+                records = []
+                for r in rows:
+                    rec = {
+                        'id': r['id'], 'childId': r['child_id'], 'type': r['type'],
+                        'startDate': r['start_date'], 'endDate': r['end_date'],
+                        'reason': r['reason'], 'createdBy': r['created_by'], 'createdAt': r['created_at']
+                    }
+                    if r['medication_details']:
+                        try:
+                            details = json.loads(r['medication_details'])
+                            rec.update(details)
+                        except:
+                            pass
+                    records.append(rec)
+                return records
+        finally:
+            conn.close()
         return []
 
     def delete_student_record(self, record_id, data_type):
-        """Delete a record by ID from all files"""
+        """Delete a record by ID from DB"""
         deleted = False
-        
-        # 1. Delete from centralized file
-        centralized_path = self._get_centralized_file_path(data_type)
-        if os.path.exists(centralized_path):
-            with open(centralized_path, 'r', encoding='utf-8') as f:
-                try:
-                    data = json.load(f)
-                except json.JSONDecodeError:
-                    data = []
-            
-            original_len = len(data)
-            data = [r for r in data if r.get('id') != record_id]
-            
-            if len(data) < original_len:
-                with open(centralized_path, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
+        conn = self.get_db()
+        try:
+            table = 'leave_records' if data_type == 'leave' else 'med_records'
+            cursor = conn.execute(f"DELETE FROM {table} WHERE id = ?", (record_id,))
+            if cursor.rowcount > 0:
                 deleted = True
-                print(f"[DATA_SERVICE] Deleted from centralized: {centralized_path}")
-        
-        # 2. Find and delete from individual student files
-        students_dir = os.path.join(self.data_dir, 'students')
-        if os.path.exists(students_dir):
-            for student_id in os.listdir(students_dir):
-                student_file = os.path.join(students_dir, student_id, f'{data_type}.json')
-                if os.path.exists(student_file):
-                    with open(student_file, 'r', encoding='utf-8') as f:
-                        try:
-                            data = json.load(f)
-                        except json.JSONDecodeError:
-                            continue
-                    
-                    original_len = len(data)
-                    data = [r for r in data if r.get('id') != record_id]
-                    
-                    if len(data) < original_len:
-                        with open(student_file, 'w', encoding='utf-8') as f:
-                            json.dump(data, f, ensure_ascii=False, indent=2)
-                        deleted = True
-                        print(f"[DATA_SERVICE] Deleted from student file: {student_file}")
-        
+                print(f"[DATA_SERVICE] Deleted {data_type} record {record_id} from DB")
+            conn.commit()
+        finally:
+            conn.close()
+            
         return deleted
 
     def get_available_surveys(self, child_class=None):
-        """
-        List all surveys, optionally filtered by class.
-        Args:
-            child_class: If provided, filter surveys where targetClasses includes this class
-                         or targetClasses is empty/missing (applies to all)
-        """
-        base_dir = self._get_survey_def_path()
+        """List all surveys, optionally filtered by class."""
         surveys = []
-        if os.path.exists(base_dir):
-            for filename in os.listdir(base_dir):
-                if filename.endswith('.json'):
-                    with open(os.path.join(base_dir, filename), 'r', encoding='utf-8') as f:
-                        try:
-                            survey = json.load(f)
-                            # Check class targeting
-                            target_classes = survey.get('targetClasses', [])
-                            if child_class and target_classes:
-                                # If target classes specified, check if child's class matches
-                                if child_class not in target_classes:
-                                    continue
-                            # Check if expired (optional - skip expired surveys)
-                            due_date = survey.get('dueDate')
-                            if due_date:
-                                from datetime import datetime as dt
-                                try:
-                                    if dt.strptime(due_date, '%Y-%m-%d').date() < dt.now().date():
-                                        continue  # Skip expired
-                                except:
-                                    pass
-                            surveys.append(survey)
-                        except:
-                            pass
+        conn = self.get_db()
+        try:
+            rows = conn.execute('SELECT * FROM surveys').fetchall()
+            for r in rows:
+                target_classes = json.loads(r['target_classes']) if r['target_classes'] else []
+                if child_class and target_classes and child_class not in target_classes:
+                    continue
+                
+                due_date = r['due_date']
+                if due_date:
+                    from datetime import datetime as dt
+                    try:
+                        if dt.strptime(due_date, '%Y-%m-%d').date() < dt.now().date():
+                            continue
+                    except:
+                        pass
+                
+                surveys.append({
+                    'id': r['id'],
+                    'title': r['title'],
+                    'description': r['description'],
+                    'dueDate': r['due_date'],
+                    'targetClasses': target_classes,
+                    'questions': json.loads(r['questions']) if r['questions'] else []
+                })
+        finally:
+            conn.close()
         return surveys
 
     def get_survey_definition(self, survey_id):
-        """
-        Get a single survey definition by ID.
-        Returns the survey dict or None if not found.
-        """
-        file_path = self._get_survey_def_path(survey_id)
-        if os.path.exists(file_path):
-            with open(file_path, 'r', encoding='utf-8') as f:
-                try:
-                    return json.load(f)
-                except:
-                    return None
+        conn = self.get_db()
+        try:
+            r = conn.execute('SELECT * FROM surveys WHERE id = ?', (survey_id,)).fetchone()
+            if r:
+                return {
+                    'id': r['id'],
+                    'title': r['title'],
+                    'description': r['description'],
+                    'dueDate': r['due_date'],
+                    'targetClasses': json.loads(r['target_classes']) if r['target_classes'] else [],
+                    'questions': json.loads(r['questions']) if r['questions'] else []
+                }
+        finally:
+            conn.close()
         return None
 
-
     def get_child_survey_status(self, survey_id, child_id):
-        """
-        Check if a child has completed a survey.
-        Returns: 'completed' or 'pending'
-        """
-        file_path = self._get_survey_response_path(survey_id)
-        if os.path.exists(file_path):
-            with open(file_path, 'r', encoding='utf-8') as f:
-                try:
-                    responses = json.load(f)
-                    if child_id in responses:
-                        return 'completed'
-                except:
-                    pass
+        conn = self.get_db()
+        try:
+            r = conn.execute('SELECT 1 FROM survey_responses WHERE survey_id = ? AND child_id = ?', (survey_id, child_id)).fetchone()
+            if r:
+                return 'completed'
+        finally:
+            conn.close()
         return 'pending'
 
     def get_survey_response(self, survey_id, child_id):
-        """
-        Get existing survey response for a child.
-        Returns the response dict (answers, timestamp, submittedBy) or None if not found.
-        """
-        file_path = self._get_survey_response_path(survey_id)
-        if os.path.exists(file_path):
-            with open(file_path, 'r', encoding='utf-8') as f:
-                try:
-                    responses = json.load(f)
-                    if child_id in responses:
-                        return responses[child_id]
-                except:
-                    pass
+        conn = self.get_db()
+        try:
+            r = conn.execute('SELECT * FROM survey_responses WHERE survey_id = ? AND child_id = ?', (survey_id, child_id)).fetchone()
+            if r:
+                return {
+                    'answers': json.loads(r['answers']) if r['answers'] else {},
+                    'timestamp': r['timestamp'],
+                    'submittedBy': r['submitted_by']
+                }
+        finally:
+            conn.close()
         return None
 
     def save_survey_response(self, survey_id, child_id, answers, user_id=''):
-        file_path = self._get_survey_response_path(survey_id)
-        
-        # Ensure responses directory exists
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        
-        responses = {}
-        if os.path.exists(file_path):
-            with open(file_path, 'r', encoding='utf-8') as f:
-                try:
-                    responses = json.load(f)
-                except:
-                    responses = {}
-        
-        # Structure: { "child_id": { answers, timestamp, submittedBy } }
-        responses[child_id] = {
-            "answers": answers,
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            "submittedBy": user_id
-        }
-
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(responses, f, ensure_ascii=False, indent=2)
-
-        return True
-
+        conn = self.get_db()
+        try:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            ans_json = json.dumps(answers, ensure_ascii=False)
+            
+            conn.execute('''
+                INSERT INTO survey_responses (survey_id, child_id, answers, timestamp, submitted_by)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(survey_id, child_id) DO UPDATE SET
+                    answers = excluded.answers,
+                    timestamp = excluded.timestamp,
+                    submitted_by = excluded.submitted_by
+            ''', (survey_id, child_id, ans_json, timestamp, user_id))
+            conn.commit()
+            return True
+        finally:
+            conn.close()

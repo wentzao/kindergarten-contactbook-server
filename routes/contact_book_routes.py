@@ -1,392 +1,247 @@
 from flask import Blueprint, request, jsonify
-import os
+from datetime import datetime
 import json
+from services.data_service import DataService
+import os
 
 contact_book_bp = Blueprint('contact_book', __name__)
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
+data_service = DataService(DATA_DIR)
 
-def get_student_contact_book_path(student_id, year, month):
-    """Get path to contact book JSON file"""
-    return os.path.join(DATA_DIR, 'students', student_id, 'contact-book', str(year), f'{month:02d}.json')
+# Helper to deserialize json fields safely
+def load_json(val):
+    if not val:
+        return None
+    try:
+        return json.loads(val)
+    except:
+        return None
+
+def format_record(r, version='original'):
+    rec = {
+        'date': r['date'],
+        'dayOfWeek': r['day_of_week'],
+        'status': r['status'],
+        'readAt': r['read_at'],
+        'signedAt': r['signed_at'],
+        'itemsToBring': load_json(r['items_to_bring']),
+        'returnedItems': load_json(r['returned_items']) or [],
+        'attachedItems': load_json(r['attached_items']) or [],
+        'original': {
+            'teacher': load_json(r['original_teacher']),
+            'parent': load_json(r['original_parent'])
+        },
+        'redacted': load_json(r['redacted']),
+        'comments': load_json(r['comments']) or [],
+        'surveyId': r['survey_id']
+    }
+    
+    # Apply versioning overlay (original or redacted)
+    if version == 'redacted' and rec['redacted']:
+        rec['teacher'] = rec['redacted'].get('teacher')
+        rec['parent'] = rec['redacted'].get('parent')
+    else:
+        rec['teacher'] = rec['original'].get('teacher')
+        rec['parent'] = rec['original'].get('parent')
+        
+    return rec
 
 @contact_book_bp.route('/<student_id>/months', methods=['GET'])
 def get_available_months(student_id):
     """Get list of available months for a student's contact book"""
-    print(f"[CONTACT_BOOK MONTHS] student_id={student_id}")
-    
-    student_dir = os.path.join(DATA_DIR, 'students', student_id, 'contact-book')
-    
-    if not os.path.exists(student_dir):
-        return jsonify([]), 200
-    
-    months = []
-    
-    # Iterate through years and months
-    for year_dir in sorted(os.listdir(student_dir)):
-        year_path = os.path.join(student_dir, year_dir)
-        if not os.path.isdir(year_path):
-            continue
-        for month_file in sorted(os.listdir(year_path)):
-            if not month_file.endswith('.json'):
-                continue
-            month_num = month_file.replace('.json', '')
-            months.append(f"{year_dir}-{month_num}")
-    
-    print(f"[CONTACT_BOOK MONTHS] Found {len(months)} months: {months}")
-    return jsonify(months), 200
+    conn = data_service.get_db()
+    try:
+        rows = conn.execute('SELECT DISTINCT year, month FROM contact_books WHERE student_id = ? ORDER BY year ASC, month ASC', (student_id,)).fetchall()
+        months = [f"{r['year']}-{r['month']:02d}" for r in rows]
+        return jsonify(months), 200
+    finally:
+        conn.close()
 
 @contact_book_bp.route('/<student_id>/<int:year>/<int:month>', methods=['GET'])
 def get_contact_book(student_id, year, month):
-    """
-    Get contact book for a student for a specific month.
-    Query param: version=original (default) or version=redacted
-    """
     version = request.args.get('version', 'original')
-    print(f"[CONTACT_BOOK GET] student_id={student_id}, year={year}, month={month}, version={version}")
-    
-    filepath = get_student_contact_book_path(student_id, year, month)
-    
-    if not os.path.exists(filepath):
-        print(f"[CONTACT_BOOK GET] File not found: {filepath}")
-        return jsonify({'error': 'Contact book not found'}), 404
-    
+    conn = data_service.get_db()
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        rows = conn.execute('SELECT * FROM contact_books WHERE student_id = ? AND year = ? AND month = ? ORDER BY date ASC', (student_id, year, month)).fetchall()
+        if not rows:
+            # We can return empty records structure like before
+            return jsonify({'studentId': student_id, 'year': year, 'month': month, 'records': []}), 200
         
-        # If requesting redacted version, filter the records
-        if version == 'redacted':
-            for record in data.get('records', []):
-                if record.get('redacted'):
-                    record['teacher'] = record['redacted'].get('teacher')
-                    record['parent'] = record['redacted'].get('parent')
-                elif record.get('original'):
-                    record['teacher'] = record['original'].get('teacher')
-                    record['parent'] = record['original'].get('parent')
-        else:
-            # Return original version
-            for record in data.get('records', []):
-                if record.get('original'):
-                    record['teacher'] = record['original'].get('teacher')
-                    record['parent'] = record['original'].get('parent')
+        records = [format_record(r, version) for r in rows]
         
-        print(f"[CONTACT_BOOK GET] Returning {len(data.get('records', []))} records")
-        return jsonify(data)
+        data = {
+            'studentId': student_id,
+            'year': year,
+            'month': month,
+            'records': records,
+            'metadata': {'lastModified': rows[0]['last_modified'] if rows and rows[0]['last_modified'] else datetime.now().isoformat()}
+        }
+        return jsonify(data), 200
     except Exception as e:
-        print(f"[CONTACT_BOOK GET] Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
 
 @contact_book_bp.route('/<student_id>/<date>/parent', methods=['PUT'])
 def update_parent_entry(student_id, date):
-    """Update parent's entry for a specific date"""
+    data = request.json
+    year, month, day = map(int, date.split('-'))
+    conn = data_service.get_db()
     try:
-        print(f"[CONTACT_BOOK PUT PARENT] student_id={student_id}, date={date}")
-        data = request.json
-        
-        # Parse date to get year and month
-        year, month, day = date.split('-')
-        filepath = get_student_contact_book_path(student_id, int(year), int(month))
-        
-        # Load existing data
-        if os.path.exists(filepath):
-            with open(filepath, 'r', encoding='utf-8') as f:
-                contact_book = json.load(f)
+        row = conn.execute('SELECT original_parent FROM contact_books WHERE student_id = ? AND date = ?', (student_id, date)).fetchone()
+        if not row:
+            conn.execute('''
+                INSERT INTO contact_books (student_id, date, year, month, status, original_parent, last_modified)
+                VALUES (?, ?, ?, ?, 'pending_teacher', ?, ?)
+            ''', (student_id, date, year, month, json.dumps(data, ensure_ascii=False), datetime.now().isoformat()))
         else:
-            # Create new file structure
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
-            contact_book = {
-                'studentId': student_id,
-                'year': int(year),
-                'month': int(month),
-                'records': [],
-                'metadata': {}
-            }
-        
-        # Find or create record for the date
-        record = next((r for r in contact_book['records'] if r['date'] == date), None)
-        if not record:
-            record = {
-                'date': date,
-                'dayOfWeek': '',
-                'status': 'pending_teacher',
-                'original': {'teacher': None, 'parent': None},
-                'redacted': None
-            }
-            contact_book['records'].append(record)
-        
-        # Update parent entry in original
-        if 'original' not in record:
-            record['original'] = {'teacher': None, 'parent': None}
-        record['original']['parent'] = data
-        
-        # Update metadata
-        from datetime import datetime
-        contact_book['metadata']['lastModified'] = datetime.now().isoformat()
-        
-        # Save
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(contact_book, f, ensure_ascii=False, indent=2)
-        
-        print(f"[CONTACT_BOOK PUT PARENT] Successfully updated")
+            conn.execute('UPDATE contact_books SET original_parent = ?, last_modified = ? WHERE student_id = ? AND date = ?',
+                         (json.dumps(data, ensure_ascii=False), datetime.now().isoformat(), student_id, date))
+        conn.commit()
         return jsonify({'status': 'updated'}), 200
     except Exception as e:
-        print(f"[CONTACT_BOOK PUT PARENT] Error: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
 
 @contact_book_bp.route('/<student_id>/<date>/teacher', methods=['PUT'])
 def update_teacher_entry(student_id, date):
-    """Update teacher's entry for a specific date"""
+    data = request.json
+    year, month, day = map(int, date.split('-'))
+    conn = data_service.get_db()
     try:
-        print(f"[CONTACT_BOOK PUT TEACHER] student_id={student_id}, date={date}")
-        data = request.json
-        
-        # Parse date to get year and month
-        year, month, day = date.split('-')
-        filepath = get_student_contact_book_path(student_id, int(year), int(month))
-        
-        # Load existing data
-        if os.path.exists(filepath):
-            with open(filepath, 'r', encoding='utf-8') as f:
-                contact_book = json.load(f)
+        row = conn.execute('SELECT id FROM contact_books WHERE student_id = ? AND date = ?', (student_id, date)).fetchone()
+        if not row:
+            conn.execute('''
+                INSERT INTO contact_books (student_id, date, year, month, status, original_teacher, last_modified)
+                VALUES (?, ?, ?, ?, 'completed', ?, ?)
+            ''', (student_id, date, year, month, json.dumps(data, ensure_ascii=False), datetime.now().isoformat()))
         else:
-            return jsonify({'error': 'Contact book not found'}), 404
-        
-        # Find record for the date
-        record = next((r for r in contact_book['records'] if r['date'] == date), None)
-        if not record:
-            return jsonify({'error': 'Record for date not found'}), 404
-        
-        # Update teacher entry in original
-        if 'original' not in record:
-            record['original'] = {'teacher': None, 'parent': None}
-        record['original']['teacher'] = data
-        record['status'] = 'completed'
-        
-        # Update metadata
-        from datetime import datetime
-        contact_book['metadata']['lastModified'] = datetime.now().isoformat()
-        
-        # Save
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(contact_book, f, ensure_ascii=False, indent=2)
-        
-        print(f"[CONTACT_BOOK PUT TEACHER] Successfully updated")
+            conn.execute('UPDATE contact_books SET original_teacher = ?, status = ?, last_modified = ? WHERE student_id = ? AND date = ?',
+                         (json.dumps(data, ensure_ascii=False), 'completed', datetime.now().isoformat(), student_id, date))
+        conn.commit()
         return jsonify({'status': 'updated'}), 200
     except Exception as e:
-        print(f"[CONTACT_BOOK PUT TEACHER] Error: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
 
 @contact_book_bp.route('/<student_id>/latest', methods=['GET'])
 def get_latest_records(student_id):
-    """Get the latest N contact book records for a student"""
     limit = request.args.get('limit', 10, type=int)
-    print(f"[CONTACT_BOOK LATEST] student_id={student_id}, limit={limit}")
-    
-    student_dir = os.path.join(DATA_DIR, 'students', student_id, 'contact-book')
-    
-    if not os.path.exists(student_dir):
-        return jsonify({'error': 'Student not found'}), 404
-    
-    all_records = []
-    
-    # Iterate through years and months
-    for year_dir in sorted(os.listdir(student_dir), reverse=True):
-        year_path = os.path.join(student_dir, year_dir)
-        if not os.path.isdir(year_path):
-            continue
-        for month_file in sorted(os.listdir(year_path), reverse=True):
-            if not month_file.endswith('.json'):
-                continue
-            filepath = os.path.join(year_path, month_file)
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                for record in data.get('records', []):
-                    # Flatten original to top level for convenience
-                    if record.get('original'):
-                        record['teacher'] = record['original'].get('teacher')
-                        record['parent'] = record['original'].get('parent')
-                    all_records.append(record)
-            except:
-                continue
-    
-    # Sort by date descending
-    all_records.sort(key=lambda x: x.get('date', ''), reverse=True)
-    
-    print(f"[CONTACT_BOOK LATEST] Returning {min(limit, len(all_records))} records")
-    return jsonify(all_records[:limit])
+    conn = data_service.get_db()
+    try:
+        rows = conn.execute('SELECT * FROM contact_books WHERE student_id = ? ORDER BY date DESC LIMIT ?', (student_id, limit)).fetchall()
+        records = [format_record(r, 'original') for r in rows]
+        return jsonify(records), 200
+    finally:
+        conn.close()
 
 @contact_book_bp.route('/<student_id>/<date>/read', methods=['PUT'])
 def mark_as_read(student_id, date):
-    """Mark a contact book entry as read by parent"""
+    data = request.json or {}
+    conn = data_service.get_db()
     try:
-        print(f"[CONTACT_BOOK READ] student_id={student_id}, date={date}")
-        data = request.json or {}
-        
-        year, month, day = date.split('-')
-        filepath = get_student_contact_book_path(student_id, int(year), int(month))
-        
-        if not os.path.exists(filepath):
-            return jsonify({'error': 'Contact book not found'}), 404
-        
-        with open(filepath, 'r', encoding='utf-8') as f:
-            contact_book = json.load(f)
-        
-        record = next((r for r in contact_book['records'] if r['date'] == date), None)
-        if not record:
+        row = conn.execute('SELECT status FROM contact_books WHERE student_id = ? AND date = ?', (student_id, date)).fetchone()
+        if not row:
             return jsonify({'error': 'Record not found'}), 404
         
-        # Only update if currently pending_parent
-        if record.get('status') == 'pending_parent':
-            record['status'] = 'read'
-            record['readAt'] = data.get('readAt') or __import__('datetime').datetime.now().isoformat()
-            
-            contact_book['metadata']['lastModified'] = __import__('datetime').datetime.now().isoformat()
-            
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(contact_book, f, ensure_ascii=False, indent=2)
-        
+        if row['status'] == 'pending_parent':
+            read_at = data.get('readAt') or datetime.now().isoformat()
+            conn.execute('UPDATE contact_books SET status = ?, read_at = ?, last_modified = ? WHERE student_id = ? AND date = ?',
+                         ('read', read_at, datetime.now().isoformat(), student_id, date))
+            conn.commit()
         return jsonify({'status': 'updated'}), 200
     except Exception as e:
-        print(f"[CONTACT_BOOK READ] Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
 
 @contact_book_bp.route('/<student_id>/<date>/sign', methods=['PUT'])
 def mark_as_signed(student_id, date):
-    """Mark a contact book entry as signed by parent"""
+    data = request.json or {}
+    conn = data_service.get_db()
     try:
-        print(f"[CONTACT_BOOK SIGN] student_id={student_id}, date={date}")
-        data = request.json or {}
-        
-        year, month, day = date.split('-')
-        filepath = get_student_contact_book_path(student_id, int(year), int(month))
-        
-        if not os.path.exists(filepath):
-            return jsonify({'error': 'Contact book not found'}), 404
-        
-        with open(filepath, 'r', encoding='utf-8') as f:
-            contact_book = json.load(f)
-        
-        record = next((r for r in contact_book['records'] if r['date'] == date), None)
-        if not record:
+        row = conn.execute('SELECT original_parent FROM contact_books WHERE student_id = ? AND date = ?', (student_id, date)).fetchone()
+        if not row:
             return jsonify({'error': 'Record not found'}), 404
         
-        # Update status to signed
-        record['status'] = 'signed'
-        record['signedAt'] = data.get('signedAt') or __import__('datetime').datetime.now().isoformat()
+        signed_at = data.get('signedAt') or datetime.now().isoformat()
         
         # Update parent note if provided
+        new_parent_data = None
         if data.get('note'):
-            if 'original' not in record:
-                record['original'] = {'teacher': None, 'parent': None}
-            if not record['original'].get('parent'):
-                record['original']['parent'] = {}
-            record['original']['parent']['note'] = data['note']
-            record['original']['parent']['updatedAt'] = record['signedAt']
-        
-        contact_book['metadata']['lastModified'] = __import__('datetime').datetime.now().isoformat()
-        
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(contact_book, f, ensure_ascii=False, indent=2)
-        
+            parent_obj = load_json(row['original_parent']) or {}
+            parent_obj['note'] = data['note']
+            parent_obj['updatedAt'] = signed_at
+            new_parent_data = json.dumps(parent_obj, ensure_ascii=False)
+            
+            conn.execute('UPDATE contact_books SET status = ?, signed_at = ?, original_parent = ?, last_modified = ? WHERE student_id = ? AND date = ?',
+                         ('signed', signed_at, new_parent_data, datetime.now().isoformat(), student_id, date))
+        else:
+            conn.execute('UPDATE contact_books SET status = ?, signed_at = ?, last_modified = ? WHERE student_id = ? AND date = ?',
+                         ('signed', signed_at, datetime.now().isoformat(), student_id, date))
+        conn.commit()
         return jsonify({'status': 'signed'}), 200
     except Exception as e:
-        print(f"[CONTACT_BOOK SIGN] Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
 
 @contact_book_bp.route('/<student_id>/<date>/items-checked', methods=['PUT'])
 def update_items_checked(student_id, date):
-    """Update the checked items list"""
+    data = request.json or {}
+    conn = data_service.get_db()
     try:
-        print(f"[CONTACT_BOOK ITEMS] student_id={student_id}, date={date}")
-        data = request.json or {}
-        
-        year, month, day = date.split('-')
-        filepath = get_student_contact_book_path(student_id, int(year), int(month))
-        
-        if not os.path.exists(filepath):
-            return jsonify({'error': 'Contact book not found'}), 404
-        
-        with open(filepath, 'r', encoding='utf-8') as f:
-            contact_book = json.load(f)
-        
-        record = next((r for r in contact_book['records'] if r['date'] == date), None)
-        if not record:
+        row = conn.execute('SELECT items_to_bring FROM contact_books WHERE student_id = ? AND date = ?', (student_id, date)).fetchone()
+        if not row:
             return jsonify({'error': 'Record not found'}), 404
         
-        # Update checked items
-        if record.get('itemsToBring'):
-            record['itemsToBring']['checkedItems'] = data.get('checkedItems', [])
-            record['itemsToBring']['checkedAt'] = data.get('checkedAt') or __import__('datetime').datetime.now().isoformat()
+        items_obj = load_json(row['items_to_bring']) or {}
+        items_obj['checkedItems'] = data.get('checkedItems', [])
+        items_obj['checkedAt'] = data.get('checkedAt') or datetime.now().isoformat()
         
-        contact_book['metadata']['lastModified'] = __import__('datetime').datetime.now().isoformat()
-        
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(contact_book, f, ensure_ascii=False, indent=2)
-        
+        conn.execute('UPDATE contact_books SET items_to_bring = ?, last_modified = ? WHERE student_id = ? AND date = ?',
+                     (json.dumps(items_obj, ensure_ascii=False), datetime.now().isoformat(), student_id, date))
+        conn.commit()
         return jsonify({'status': 'updated'}), 200
     except Exception as e:
-        print(f"[CONTACT_BOOK ITEMS] Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
 
 @contact_book_bp.route('/<student_id>/<date>/comments', methods=['GET', 'POST'])
 def handle_comments(student_id, date):
-    """Get or add comments for a contact book entry"""
+    conn = data_service.get_db()
     try:
-        year, month, day = date.split('-')
-        filepath = get_student_contact_book_path(student_id, int(year), int(month))
-        
-        if not os.path.exists(filepath):
-            return jsonify({'error': 'Contact book not found'}), 404
-        
-        with open(filepath, 'r', encoding='utf-8') as f:
-            contact_book = json.load(f)
-        
-        record = next((r for r in contact_book['records'] if r['date'] == date), None)
-        if not record:
+        row = conn.execute('SELECT comments FROM contact_books WHERE student_id = ? AND date = ?', (student_id, date)).fetchone()
+        if not row:
             return jsonify({'error': 'Record not found'}), 404
+            
+        comments = load_json(row['comments']) or []
         
         if request.method == 'GET':
-            # Return comments for this date
-            comments = record.get('comments', [])
             return jsonify(comments), 200
-        
+            
         elif request.method == 'POST':
-            # Add a new comment
             data = request.json
             if not data or not data.get('content'):
                 return jsonify({'error': 'Content is required'}), 400
-            
-            # Ensure comments array exists
-            if 'comments' not in record:
-                record['comments'] = []
-            
-            # Create comment object
-            import datetime
+                
             comment = {
                 'senderId': data.get('senderId', 'parent'),
                 'name': data.get('name', '家長'),
                 'content': data['content'],
-                'createdAt': datetime.datetime.now().isoformat()
+                'createdAt': datetime.now().isoformat()
             }
+            comments.append(comment)
             
-            record['comments'].append(comment)
-            
-            # Update metadata
-            if 'metadata' not in contact_book:
-                contact_book['metadata'] = {}
-            contact_book['metadata']['lastModified'] = datetime.datetime.now().isoformat()
-            
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(contact_book, f, ensure_ascii=False, indent=2)
-            
-            print(f"[CONTACT_BOOK COMMENT] Added comment for {student_id}/{date}")
+            conn.execute('UPDATE contact_books SET comments = ?, last_modified = ? WHERE student_id = ? AND date = ?',
+                         (json.dumps(comments, ensure_ascii=False), datetime.now().isoformat(), student_id, date))
+            conn.commit()
             return jsonify(comment), 201
             
     except Exception as e:
-        print(f"[CONTACT_BOOK COMMENT] Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
