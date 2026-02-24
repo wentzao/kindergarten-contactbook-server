@@ -36,7 +36,6 @@ def teacher_login():
             
             return jsonify({
                 'uuid': t.get('uuid'),
-                'userId': user_id,
                 'name': t.get('cname') or t.get('ename'),
                 'cname': t.get('cname'),
                 'ename': t.get('ename'),
