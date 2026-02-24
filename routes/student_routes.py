@@ -15,7 +15,7 @@ def get_current_semester():
 
 import json
 
-TEACHER_DATA_PATH = r'\\192.168.50.53\server\桌面\punchcard-2022-checker\static\teacher_info\data\teacher_data.json'
+WEB_WENTZAO_TEACHER_AUTH_API = 'https://web.wentzao.com/api/get_teacher_for_auth'
 
 @student_bp.route('/classes', methods=['GET'])
 def get_classes():
@@ -25,18 +25,22 @@ def get_classes():
     if not user_id:
         return jsonify({'error': 'Missing userId'}), 400
         
-    # Validation Teacher Role
+    # 透過 web.wentzao.com API 驗證教師身分
     try:
-        with open(TEACHER_DATA_PATH, 'r', encoding='utf-8') as f:
-            teacher_data = json.load(f)
-    except Exception as e:
-        return jsonify({'error': f'Failed to load teacher config: {str(e)}'}), 500
+        auth_resp = requests.post(
+            WEB_WENTZAO_TEACHER_AUTH_API,
+            json={'userId': user_id},
+            timeout=10
+        )
+        if auth_resp.status_code != 200:
+            err_msg = auth_resp.json().get('error', 'Unauthorized') if auth_resp.headers.get('content-type', '').startswith('application/json') else 'Unauthorized'
+            return jsonify({'error': err_msg}), auth_resp.status_code
         
-    teacher = next((t for t in teacher_data.get('teachers', []) if t.get('userId') == user_id), None)
-    if not teacher or teacher.get('status') != '在職':
-        return jsonify({'error': 'Unauthorized'}), 401
+        teacher = auth_resp.json()
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': f'Failed to verify teacher: {str(e)}'}), 502
         
-    is_admin = teacher.get('category') in ['管理員', '行政人員']
+    is_admin = teacher.get('isAdmin', False)
     teaching_classes = [c.get('className') for c in teacher.get('teachingClasses', {}).get(semester, [])]
     
     url = "https://web.wentzao.com/api/get_class_student_info"
