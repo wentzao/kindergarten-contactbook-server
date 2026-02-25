@@ -17,11 +17,29 @@ def load_json(val):
     except:
         return None
 
+DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六']
+
 def format_record(r, version='original'):
+    # Compute dayOfWeek from date if not stored
+    date_str = r['date']
+    stored_dow = r['day_of_week']
+    if not stored_dow:
+        try:
+            y, m, d = map(int, date_str.split('-'))
+            dow_index = datetime(y, m, d).weekday()  # 0=Mon ... 6=Sun
+            stored_dow = DAY_NAMES[(dow_index + 1) % 7]  # Convert to Chinese
+        except:
+            stored_dow = ''
+    
+    # Normalize status: 'completed' means teacher filled but parent hasn't read yet
+    status = r['status']
+    if status == 'completed':
+        status = 'pending_parent'
+    
     rec = {
-        'date': r['date'],
-        'dayOfWeek': r['day_of_week'],
-        'status': r['status'],
+        'date': date_str,
+        'dayOfWeek': stored_dow,
+        'status': status,
         'readAt': r['read_at'],
         'signedAt': r['signed_at'],
         'itemsToBring': load_json(r['items_to_bring']),
@@ -174,7 +192,7 @@ def mark_as_read(student_id, date):
         if not row:
             return jsonify({'error': 'Record not found'}), 404
         
-        if row['status'] == 'pending_parent':
+        if row['status'] in ('pending_parent', 'completed'):
             read_at = data.get('readAt') or datetime.now().isoformat()
             conn.execute('UPDATE contact_books SET status = ?, read_at = ?, last_modified = ? WHERE student_id = ? AND date = ?',
                          ('read', read_at, datetime.now().isoformat(), student_id, date))
