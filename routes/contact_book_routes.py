@@ -108,17 +108,45 @@ def update_parent_entry(student_id, date):
 def update_teacher_entry(student_id, date):
     data = request.json
     year, month, day = map(int, date.split('-'))
+    
+    # Extract fields that have their own DB columns (not stored inside teacher JSON)
+    survey_id = data.pop('surveyId', None) or None
+    
+    # itemsToBring: frontend sends plain array like ["水壺", "餐具"]
+    # DB stores as {"items": [...], "checkedItems": [...], "checkedAt": ...}
+    raw_items = data.pop('itemsToBring', None)
+    if raw_items and isinstance(raw_items, list) and len(raw_items) > 0:
+        items_to_bring = json.dumps({'items': raw_items}, ensure_ascii=False)
+    else:
+        items_to_bring = None
+    
+    # returnedItems: stored as plain JSON array
+    raw_returned = data.pop('returnedItems', None)
+    if raw_returned and isinstance(raw_returned, list) and len(raw_returned) > 0:
+        returned_items = json.dumps(raw_returned, ensure_ascii=False)
+    else:
+        returned_items = None
+    
+    # attachedItems: also stored separately
+    raw_attached = data.pop('attachedItems', None)
+    attached_items = json.dumps(raw_attached, ensure_ascii=False) if raw_attached else None
+    
     conn = data_service.get_db()
     try:
         row = conn.execute('SELECT id FROM contact_books WHERE student_id = ? AND date = ?', (student_id, date)).fetchone()
         if not row:
             conn.execute('''
-                INSERT INTO contact_books (student_id, date, year, month, status, original_teacher, last_modified)
-                VALUES (?, ?, ?, ?, 'completed', ?, ?)
-            ''', (student_id, date, year, month, json.dumps(data, ensure_ascii=False), datetime.now().isoformat()))
+                INSERT INTO contact_books (student_id, date, year, month, status, original_teacher, 
+                    items_to_bring, returned_items, attached_items, survey_id, last_modified)
+                VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?)
+            ''', (student_id, date, year, month, json.dumps(data, ensure_ascii=False),
+                  items_to_bring, returned_items, attached_items, survey_id, datetime.now().isoformat()))
         else:
-            conn.execute('UPDATE contact_books SET original_teacher = ?, status = ?, last_modified = ? WHERE student_id = ? AND date = ?',
-                         (json.dumps(data, ensure_ascii=False), 'completed', datetime.now().isoformat(), student_id, date))
+            conn.execute('''UPDATE contact_books SET original_teacher = ?, items_to_bring = ?, 
+                returned_items = ?, attached_items = ?, survey_id = ?, status = ?, last_modified = ? 
+                WHERE student_id = ? AND date = ?''',
+                (json.dumps(data, ensure_ascii=False), items_to_bring, returned_items, 
+                 attached_items, survey_id, 'completed', datetime.now().isoformat(), student_id, date))
         conn.commit()
         return jsonify({'status': 'updated'}), 200
     except Exception as e:

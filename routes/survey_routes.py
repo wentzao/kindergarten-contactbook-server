@@ -6,6 +6,21 @@ import os
 survey_bp = Blueprint('survey', __name__)
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 data_service = DataService(DATA_DIR)
+@survey_bp.route('/all', methods=['GET'])
+def list_all_surveys():
+    """List all surveys for teacher to pick (no class/expiry filter)."""
+    conn = data_service.get_db()
+    try:
+        rows = conn.execute('SELECT id, title, description, due_date FROM surveys ORDER BY due_date DESC').fetchall()
+        surveys = [{
+            'id': r['id'],
+            'title': r['title'],
+            'description': r['description'],
+            'dueDate': r['due_date'],
+        } for r in rows]
+        return jsonify(surveys)
+    finally:
+        conn.close()
 
 @survey_bp.route('/available/<child_id>', methods=['GET'])
 def get_available_surveys(child_id):
