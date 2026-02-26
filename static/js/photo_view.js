@@ -1068,10 +1068,12 @@ document.addEventListener('DOMContentLoaded', function () {
                     console.log(`幻燈片切換到 ${activeIndex}`);
 
                     // 先設置收藏按鈕狀態
-                    if (currentPhoto && favoritePhotos.has(currentPhoto.photoId)) {
-                        favoriteButton.classList.add('active');
-                    } else {
-                        favoriteButton.classList.remove('active');
+                    if (favoriteButton) {
+                        if (currentPhoto && favoritePhotos.has(currentPhoto.photoId)) {
+                            favoriteButton.classList.add('active');
+                        } else {
+                            favoriteButton.classList.remove('active');
+                        }
                     }
 
                     // 檢查當前幻燈片是否為影片
@@ -1081,15 +1083,15 @@ document.addEventListener('DOMContentLoaded', function () {
 
                     // 設置按鈕顯示狀態
                     if (isVideo) {
-                        lineButton.style.display = 'none';
+                        if (lineButton) lineButton.style.display = 'none';
                         // 設置分享按鈕文字為「分享影片」
                         if (shareButton) {
                             shareButton.textContent = '分享影片';
                             shareButton.setAttribute('aria-label', '分享影片');
                         }
                     } else {
-                        lineButton.style.display = 'block';
-                        if (liff.isInClient()) shareButton.style.display = 'block';
+                        if (lineButton) lineButton.style.display = 'block';
+                        if (shareButton && liff.isInClient()) shareButton.style.display = 'block';
                         // 設置分享按鈕文字為原始文字
                         if (shareButton) {
                             shareButton.textContent = '分享照片';
@@ -1218,10 +1220,12 @@ document.addEventListener('DOMContentLoaded', function () {
         // Initial favorite button state
         const initialPhoto = photos[index];
         const favoriteButton = document.querySelector('.favorite-button');
-        if (initialPhoto && favoritePhotos.has(initialPhoto.photoId)) {
-            favoriteButton.classList.add('active');
-        } else {
-            favoriteButton.classList.remove('active');
+        if (favoriteButton) {
+            if (initialPhoto && favoritePhotos.has(initialPhoto.photoId)) {
+                favoriteButton.classList.add('active');
+            } else {
+                favoriteButton.classList.remove('active');
+            }
         }
 
         // 檢查初始顯示的是否為影片，如果是則隱藏按鈕
@@ -1766,8 +1770,8 @@ document.addEventListener('DOMContentLoaded', function () {
         const favoriteButton = document.querySelector('.favorite-button');
 
         // 創建下載選項容器
-        let downloadOptions = buttonContainer.querySelector('.download-options');
-        if (!downloadOptions) {
+        let downloadOptions = buttonContainer ? buttonContainer.querySelector('.download-options') : null;
+        if (!downloadOptions && lineButton) {
             downloadOptions = document.createElement('div');
             downloadOptions.className = 'download-options';
             downloadOptions.innerHTML = `
@@ -1779,33 +1783,35 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         if (liff.isInClient()) {
-            buttonContainer.style.cssText = 'bottom: 2rem; left: 0; right: 0; justify-content: center;';
-            lineButton.style.display = 'block';
-            shareButton.style.display = 'block';
-            favoriteButton.style.display = 'block';
+            if (buttonContainer) buttonContainer.style.cssText = 'bottom: 2rem; left: 0; right: 0; justify-content: center;';
+            if (lineButton) lineButton.style.display = 'block';
+            if (shareButton) shareButton.style.display = 'block';
+            if (favoriteButton) favoriteButton.style.display = 'block';
         } else {
-            buttonContainer.style.cssText = 'bottom: 2rem; right: 1rem; justify-content: flex-end;';
-            lineButton.style.display = 'block';
-            shareButton.style.display = 'none';
-            favoriteButton.style.display = 'block';
+            if (buttonContainer) buttonContainer.style.cssText = 'bottom: 2rem; right: 1rem; justify-content: flex-end;';
+            if (lineButton) lineButton.style.display = 'block';
+            if (shareButton) shareButton.style.display = 'none';
+            if (favoriteButton) favoriteButton.style.display = 'block';
         }
 
         // 移除所有現有的事件監聽器
-        lineButton.replaceWith(lineButton.cloneNode(true));
-        shareButton.replaceWith(shareButton.cloneNode(true));
-        favoriteButton.replaceWith(favoriteButton.cloneNode(true));
+        if (lineButton) lineButton.replaceWith(lineButton.cloneNode(true));
+        if (shareButton) shareButton.replaceWith(shareButton.cloneNode(true));
+        if (favoriteButton) favoriteButton.replaceWith(favoriteButton.cloneNode(true));
 
         // 重新獲取新的元素引用
         const newLineButton = document.querySelector('.line-button');
         const newShareButton = document.querySelector('.share-button');
         const newFavoriteButton = document.querySelector('.favorite-button');
-        downloadOptions = newLineButton.querySelector('.download-options');
+        downloadOptions = newLineButton ? newLineButton.querySelector('.download-options') : null;
 
         // 收藏按鈕點擊事件
-        newFavoriteButton.addEventListener('click', () => {
-            const currentPhoto = photos[swiper.activeIndex];
-            toggleFavoriteStatus(currentPhoto);
-        });
+        if (newFavoriteButton) {
+            newFavoriteButton.addEventListener('click', () => {
+                const currentPhoto = photos[swiper.activeIndex];
+                toggleFavoriteStatus(currentPhoto);
+            });
+        }
 
         // 下載按鈕點擊事件
         newLineButton.addEventListener('click', (e) => {
@@ -2191,7 +2197,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function initYearToolbar() {
         const years = new Set();
-        years.add('favorites'); // 添加"我的收藏"
+        // (Teacher version: no favorites)
         years.add('all'); // 添加"最新"選項
         years.add('oldest'); // 添加"最舊"選項
 
@@ -2328,23 +2334,26 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function toggleLogoutPopup() {
         const popup = document.querySelector('.logout-popup');
-        popup.classList.toggle('show');
+        if (popup) popup.classList.toggle('show');
     }
 
-    // 添加登出功能
-    document.querySelector('.logout-btn').addEventListener('click', () => {
-        if (liff.isLoggedIn()) {
-            liff.logout();
-            window.location.reload();
-        }
-    });
+    // 添加登出功能 (Teacher version: elements may not exist)
+    const logoutBtn = document.querySelector('.logout-btn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            if (liff.isLoggedIn()) {
+                liff.logout();
+                window.location.reload();
+            }
+        });
+    }
 
     // 點擊其他地方關閉彈出框
     document.addEventListener('click', (e) => {
         const popup = document.querySelector('.logout-popup');
         const profileImage = document.querySelector('.profile-image');
 
-        if (profileImage && !profileImage.contains(e.target) && !popup.contains(e.target)) {
+        if (popup && profileImage && !profileImage.contains(e.target) && !popup.contains(e.target)) {
             popup.classList.remove('show');
         }
     });
@@ -3120,7 +3129,10 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // 初始化電子賀卡功能
-    initializeCardFeatures();
+    // Teacher version: skip card features if elements don't exist
+    if (christmasBtn) {
+        initializeCardFeatures();
+    }
 
     // 初始化日期選擇器功能
     initializeDatePicker();

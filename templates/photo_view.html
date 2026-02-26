@@ -8,7 +8,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Swiper/8.4.5/swiper-bundle.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Swiper/8.4.5/swiper-bundle.min.css">
     <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
-    <link rel="stylesheet" href="/static/css/photo_view.css">
+    <link rel="stylesheet" href="/static/css/photo_view.css?v=8">
     <style>
         /* Hide elements not needed in teacher version */
         .christmas-card-btn,
@@ -18,7 +18,8 @@
         .user-profile,
         .logout-popup,
         #login-container,
-        #preloader {
+        #preloader,
+        .year-toolbar {
             display: none !important;
         }
 
@@ -29,9 +30,9 @@
             background: #fff;
         }
 
-        .year-toolbar {
-            position: sticky;
-            top: 0;
+        /* No year-toolbar, so albums-container needs no top margin */
+        #albums-container {
+            margin-top: 12px;
         }
     </style>
 </head>
@@ -48,16 +49,7 @@
                 <div class="swiper-button-prev"></div>
             </div>
             <div class="button-container">
-                <button class="action-button favorite-button">
-                    <svg class="heart-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        stroke-linecap="round" stroke-linejoin="round">
-                        <path
-                            d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z">
-                        </path>
-                    </svg>
-                </button>
                 <button class="action-button line-button">下載照片</button>
-                <button class="action-button share-button">分享照片</button>
             </div>
         </div>
 
@@ -95,7 +87,7 @@
     </div>
 
     <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
-    <script src="/static/js/photo_view.js?v=2"></script>
+    <script src="/static/js/photo_view.js?v=8"></script>
 </body>
 
 </html>

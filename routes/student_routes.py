@@ -142,7 +142,7 @@ def get_video_api_key():
         return resp, 200
 
     try:
-        r = requests.get('https://rainbow.wentzao.com/get_api_key', timeout=5)
+        r = requests.get('https://student.wentzao.com/get_api_key', timeout=5)
         if r.status_code != 200:
             return jsonify({'error': 'Failed to get API key'}), 502
         return jsonify(r.json()), 200
