@@ -129,3 +129,22 @@ def get_student_photos():
     except requests.exceptions.RequestException as e:
         return jsonify({'error': f'Failed to fetch photos: {str(e)}'}), 500
 
+
+# Proxy endpoint: get Google Drive API key for video playback
+# Uses POST to match existing CORS-safe pattern (same as student_photos)
+@student_bp.route('/video_api_key', methods=['POST', 'OPTIONS'])
+def get_video_api_key():
+    if request.method == 'OPTIONS':
+        resp = jsonify({'status': 'ok'})
+        resp.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+        resp.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        return resp, 200
+
+    try:
+        r = requests.get('https://rainbow.wentzao.com/get_api_key', timeout=5)
+        if r.status_code != 200:
+            return jsonify({'error': 'Failed to get API key'}), 502
+        return jsonify(r.json()), 200
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': f'API key fetch error: {str(e)}'}), 500
