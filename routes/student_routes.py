@@ -74,7 +74,11 @@ def get_classes():
                 class_name = student[3]
                 gov_class = student[4]
                 student_id = student[5]
-                photo_url = student[10] if len(student) > 10 and 'http' in student[10] else "" 
+                # student[10] is GoogleDrive folder link, extract folder_id
+                drive_link = student[10] if len(student) > 10 else ""
+                folder_id = ""
+                if drive_link and 'drive.google.com' in drive_link:
+                    folder_id = drive_link.split('/')[-1].replace('?usp=drive_link', '')
                 uid = student_id # using student_id as uid
             else:
                 continue
@@ -88,7 +92,7 @@ def get_classes():
                     "status": status,
                     "className": class_name,
                     "govClass": gov_class,
-                    "photoUrl": photo_url
+                    "folderId": folder_id
                 }
                 filtered_students.append(student_obj)
                 if class_name not in filtered_classes:
