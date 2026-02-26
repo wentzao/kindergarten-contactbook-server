@@ -329,8 +329,8 @@ document.addEventListener('DOMContentLoaded', function () {
     let swipeDirection = null; // 'horizontal' or 'vertical'
     // --- END: Swipe direction locking ---
 
-    // Only enable on mobile for a better experience
-    if (window.matchMedia("(max-width: 768px)").matches) {
+    // Enable on mobile and tablet (iPad)
+    if (window.matchMedia("(max-width: 1024px)").matches) {
         albumContainer.addEventListener('touchstart', handleTouchStart, { passive: false });
         albumContainer.addEventListener('touchmove', handleTouchMove, { passive: false });
         albumContainer.addEventListener('touchend', handleTouchEnd, { passive: true });
@@ -412,7 +412,9 @@ document.addEventListener('DOMContentLoaded', function () {
             } else { // Not in favorites view
                 if (touchDeltaX > 0) { // Swipe Right
                     if (isFirst) {
-                        changeToFavoritesWithAnimation();
+                        // No favorites — bounce back
+                        albumContainer.style.transition = bounceBackTransition;
+                        albumContainer.style.transform = 'translateX(0)';
                     } else {
                         changeMonthWithAnimation('prev');
                     }
@@ -2527,37 +2529,8 @@ document.addEventListener('DOMContentLoaded', function () {
     }, 100));
 
     // 修改滾動處理函數
-    let scrollTimeout;
-    window.addEventListener('scroll', function () {
-        clearTimeout(scrollTimeout);
-
-        const dateBar = document.querySelector('.date-bar');
-        if (dateBar) {
-            // 只在桌面版確保工具列保持在中間，手機版使用 CSS 定位
-            const isMobile = window.matchMedia('(max-width: 768px)').matches;
-            if (!isMobile) {
-                dateBar.style.transform = 'translateX(-50%)';
-            }
-            dateBar.style.transition = 'none'; // 暫時移除過渡效果
-
-            // 重新啟用過渡效果
-            scrollTimeout = setTimeout(function () {
-                dateBar.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
-            }, 50);
-        }
-    }, { passive: true });
-
-    // 在頁面載入時就設定好初始狀態
-    document.addEventListener('DOMContentLoaded', function () {
-        const dateBar = document.querySelector('.date-bar');
-        if (dateBar) {
-            // 只在桌面版設定居中，手機版使用 CSS 定位
-            const isMobile = window.matchMedia('(max-width: 768px)').matches;
-            if (!isMobile) {
-                dateBar.style.transform = 'translateX(-50%)';
-            }
-        }
-    });
+    // Date-bar centering is handled entirely by CSS (left: 50%; transform: translateX(-50%))
+    // No JS scroll handler needed — removed to prevent drift on iPad
 
     // 電子賀卡相關功能
     function initializeCardFeatures() {
