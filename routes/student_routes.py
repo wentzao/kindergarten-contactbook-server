@@ -74,7 +74,11 @@ def get_classes():
                 class_name = student[3]
                 gov_class = student[4]
                 student_id = student[5]
-                photo_url = student[10] if len(student) > 10 and 'http' in student[10] else "" 
+                # GoogleDrive field: extract folder_id from drive link (index 9 = last element)
+                drive_link = student[9] if len(student) > 9 else ""
+                folder_id = ""
+                if drive_link and 'drive.google.com' in drive_link:
+                    folder_id = drive_link.split('/')[-1].replace('?usp=drive_link', '').split('?')[0]
                 uid = student_id # using student_id as uid
             else:
                 continue
@@ -88,7 +92,7 @@ def get_classes():
                     "status": status,
                     "className": class_name,
                     "govClass": gov_class,
-                    "photoUrl": photo_url
+                    "folderId": folder_id
                 }
                 filtered_students.append(student_obj)
                 if class_name not in filtered_classes:
@@ -103,3 +107,25 @@ def get_classes():
         
     except requests.exceptions.RequestException as e:
         return jsonify({'error': f'Failed to fetch data from wentzao API: {str(e)}'}), 500
+
+
+# Proxy endpoint: fetch student photos from student.wentzao.com
+@student_bp.route('/student_photos', methods=['POST'])
+def get_student_photos():
+    try:
+        data = request.get_json()
+        folder_ids = data.get('folder_ids', [])
+        
+        if not folder_ids:
+            return jsonify({'error': 'No folder_ids provided'}), 400
+        
+        response = requests.post(
+            'https://student.wentzao.com/get_photo_data',
+            json={'folder_ids': folder_ids},
+            timeout=15
+        )
+        return jsonify(response.json()), response.status_code
+        
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': f'Failed to fetch photos: {str(e)}'}), 500
+

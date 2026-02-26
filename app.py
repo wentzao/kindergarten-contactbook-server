@@ -8,7 +8,12 @@ from datetime import datetime
 # Initialize Flask App
 app = Flask(__name__)
 # Enable CORS for all routes
-CORS(app)
+CORS(app, resources={r"/api/*": {
+    "origins": ["https://teacher-contact-book.wentzao.com", "http://localhost:5173", "http://localhost:4173"],
+    "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization"],
+    "supports_credentials": True
+}})
 # Fix headers for Nginx proxy
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
