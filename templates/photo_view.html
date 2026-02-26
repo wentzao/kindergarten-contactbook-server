@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>個人相簿</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Swiper/8.4.5/swiper-bundle.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Swiper/8.4.5/swiper-bundle.min.css">
+    <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+    <link rel="stylesheet" href="/static/css/photo_view.css">
+    <style>
+        /* Hide elements not needed in teacher version */
+        .christmas-card-btn,
+        .card-toolbar,
+        .card-modal,
+        .dramatic-overlay,
+        .user-profile,
+        .logout-popup,
+        #login-container,
+        #preloader {
+            display: none !important;
+        }
+
+        /* Embedded mode: no extra top padding needed */
+        body {
+            margin: 0;
+            padding: 0;
+            background: #fff;
+        }
+
+        .year-toolbar {
+            position: sticky;
+            top: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app-wrapper" style="visibility: visible; opacity: 1;">
+        <div id="albums-container"></div>
+
+        <div class="fullscreen-overlay">
+            <div class="close-button">&times;</div>
+            <div class="swiper">
+                <div class="swiper-wrapper"></div>
+                <div class="swiper-button-next"></div>
+                <div class="swiper-button-prev"></div>
+            </div>
+            <div class="button-container">
+                <button class="action-button favorite-button">
+                    <svg class="heart-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path
+                            d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z">
+                        </path>
+                    </svg>
+                </button>
+                <button class="action-button line-button">下載照片</button>
+                <button class="action-button share-button">分享照片</button>
+            </div>
+        </div>
+
+        <div id="loading">載入中...</div>
+        <div class="custom-notification"></div>
+
+        <div class="year-toolbar">
+            <div class="toolbar-content">
+                <div class="toolbar-title">個人相簿</div>
+                <div class="year-scroll">
+                    <button class="year-btn active" data-year="all">最新</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="date-picker">
+            <div class="date-picker-header">選擇日期</div>
+            <div class="date-picker-years"></div>
+            <div class="date-picker-months"></div>
+        </div>
+
+        <div class="date-bar">
+            <button class="date-nav-btn prev-month">
+                <svg viewBox="0 0 24 24" class="arrow-svg">
+                    <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"></path>
+                </svg>
+            </button>
+            <div class="current-date"></div>
+            <button class="date-nav-btn next-month">
+                <svg viewBox="0 0 24 24" class="arrow-svg">
+                    <path d="M8.59 16.59L10 18l6-6-6-6-1.41 1.41L13.17 12z"></path>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
+    <script src="/static/js/photo_view.js?v=2"></script>
+</body>
+
+</html>

@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, render_template
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 import os
@@ -52,6 +52,11 @@ def log_request_info():
 @app.route('/')
 def index():
     return "Kindergarten Contact Book API Running"
+
+# Photo viewer page (ported from photo_view_V5, served as standalone HTML for iframe embedding)
+@app.route('/photo_view')
+def photo_view():
+    return render_template('photo_view.html')
 
 @app.route('/api/upload', methods=['POST'])
 def upload_file():

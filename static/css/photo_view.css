@@ -1,0 +1,2706 @@
+/* 在 body 樣式之前添加 CSS 變數 */
+:root {
+    /* 手機版工具列設定 */
+    --mobile-toolbar-bottom: 40px;
+    /* 工具列距離底部的距離 */
+    --mobile-toolbar-width: 280px;
+    /* 工具列的最大寬度 */
+    --mobile-toolbar-padding: 15px;
+    /* 工具列左右邊距 */
+    --mobile-toolbar-height: 64px;
+    /* 工具列高度 */
+
+    /* 桌面版工具列設定 */
+    --desktop-toolbar-bottom: 32px;
+    --desktop-toolbar-width: 340px;
+                /* 可調整的額外上移距離 */
+    --purple: rgb(123, 31, 162);
+    --violet: rgb(103, 58, 183);
+    --pink: rgb(244, 143, 177);
+    --yellow: rgb(232, 197, 36);
+    --lime: rgb(149, 178, 47);
+    --green: rgb(45, 121, 23);
+    --red: rgb(211, 47, 47);
+    --white: rgb(255, 255, 255);
+}
+
+/* 基礎樣式 */
+body {
+    margin: 0;
+    padding: 0;
+    /* background: #fff; */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    position: relative;
+    overflow-x: hidden; /* 防止水平滾動條出現 */
+}
+
+/* 背景花紋效果 */
+body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    background-color: #ffffff;
+    opacity: 0.8;
+    background-image: radial-gradient(#97b432 0.75px, transparent 0.75px), radial-gradient(#97b432 0.75px, #ffffff 0.75px);
+    background-size: 30px 30px;
+    background-position: 0 0, 15px 15px;
+}
+
+
+/* 相簿容器 */
+.album {
+    max-width: 1200px;
+    margin: 2rem auto;
+    padding: 0 10px;
+    opacity: 1;
+    transition: opacity 0.3s ease;
+    /* background: rgba(255, 255, 255, 0.7); */
+    border-radius: 12px;
+    /* backdrop-filter: blur(5px); */
+    /* -webkit-backdrop-filter: blur(5px); */
+}
+
+.album-title {
+    display: none;
+}
+
+.album-date {
+    color: #3498db;
+    font-weight: 500;
+}
+
+/* 照片網格 */
+.photo-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 10px;
+    padding: 0;
+    margin-top: 30px;
+}
+
+/* 照片項目 */
+.photo-item {
+    position: relative;
+    padding-bottom: 100%;
+    background: #eee;
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.photo-item .favorite-icon {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    width: 24px;
+    height: 24px;
+    z-index: 2;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    fill: #ff4d4d;
+    stroke: white;
+    stroke-width: 2px;
+}
+
+.photo-item.favorited .favorite-icon {
+    opacity: 1;
+}
+
+.photo-item img {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    opacity: 0;
+}
+
+/* 淡入效果 */
+.photo-item img.fade-in {
+    opacity: 1;
+}
+
+.photo-item:hover img {
+    transform: scale(1.08);
+}
+
+/* 添加陰影效果增強立體感 */
+.photo-item::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    /* background: rgba(0, 0, 0, 0); */
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+}
+
+.photo-item:hover::after {
+    background: rgba(0, 0, 0, 0);
+}
+
+/* 大尺寸照片 */
+.photo-item.large {
+    grid-column: span 2;
+    grid-row: span 2;
+}
+
+/* YouTube 容器 */
+.youtube-container {
+    position: relative;
+    padding-bottom: 28%;
+    height: 0;
+    overflow: hidden;
+    max-width: 50%;
+    margin: 20px auto;
+    border-radius: 10px;
+}
+
+.youtube-container iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+/* 全螢幕查看 */
+.fullscreen-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 1000;
+    -webkit-overflow-scrolling: touch;
+    overflow: auto;
+}
+
+.close-button {
+    position: fixed;
+    top: 15px;
+    right: 15px;
+    color: white;
+    font-size: 50px;
+    font-weight: bold;
+    cursor: pointer;
+    z-index: 1001;
+    width: 50px;
+    height: 50px;
+    text-align: center;
+    line-height: 50px;
+}
+
+/* Swiper 樣式 */
+.swiper {
+    width: 100%;
+    height: 100%;
+}
+
+.swiper-slide {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.swiper-slide img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+/* 響應式設計 */
+@media (max-width: 768px) {
+    .photo-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 5px;
+    }
+
+    .photo-item.large {
+        grid-column: span 2;
+        grid-row: span 2;
+    }
+
+    .album-title {
+        font-size: 24px;
+    }
+
+    .album {
+        padding: 0 5px;
+    }
+
+    .youtube-container {
+        max-width: calc(100% - 10px);
+        padding-bottom: 56.25%;
+        margin: 20px 5px;
+    }
+
+    .year-toolbar {
+        padding: 0;
+    }
+
+    .year-scroll {
+        padding: 0 15px;
+    }
+}
+
+/* 操作按鈕 */
+.button-container {
+    position: fixed;
+    bottom: 1rem;
+    right: 1rem;
+    display: flex;
+    justify-content: flex-end;
+    gap: 1rem;
+    padding: 0 1rem;
+    z-index: 1001;
+    align-items: center; /* 確保按鈕垂直居中 */
+}
+
+.action-button {
+    padding: 12px 24px;
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: #2c3e50;
+    border: none;
+    border-radius: 28px; /* Make it pill-shaped */
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 600;
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.1),
+        0 2px 8px rgba(0, 0, 0, 0.06),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.8),
+        inset 0 4px 20px rgba(255, 255, 255, 0.4),
+        inset 0 -2px 8px rgba(0, 0, 0, 0.06),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.4);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative; /* 確保按鈕是相對定位 */
+    display: flex;
+    align-items: center;
+    justify-content: center; /* 確保按鈕內容居中 */
+}
+
+.action-button:hover {
+    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.75);
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.12),
+        0 4px 12px rgba(0, 0, 0, 0.08),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.4),
+        inset 0 3px 0 rgba(255, 255, 255, 0.9),
+        inset 0 6px 18px rgba(255, 255, 255, 0.6),
+        inset 0 -3px 10px rgba(0, 0, 0, 0.08),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.5);
+}
+
+/* 載入動畫 */
+.loading {
+    position: relative;
+}
+
+.loading::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: loading 1.5s infinite;
+}
+
+@keyframes loading {
+    0% {
+        background-position: 200% 0;
+    }
+
+    100% {
+        background-position: -200% 0;
+    }
+}
+
+/* 載入動畫樣式 */
+#loading {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: rgba(255, 255, 255, 0.8);
+    padding: 20px;
+    border-radius: 10px;
+    display: none;
+}
+
+/* 自定義通知樣式 */
+.custom-notification {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: rgb(15, 219, 96);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 5px;
+    z-index: 9999;
+    display: none;
+}
+
+/* 分享按鈕樣式 */
+.share-button svg {
+    width: 20px;
+    height: 20px;
+    margin-right: 5px;
+}
+
+/* 修改箭頭樣式 */
+.swiper-button-next,
+.swiper-button-prev {
+    color: white !important;
+    opacity: 0.8;
+}
+
+.swiper-button-next:hover,
+.swiper-button-prev:hover {
+    opacity: 1;
+}
+
+/* 在手機版隱藏導航箭頭 */
+@media (max-width: 768px) {
+
+    /* .swiper-button-next,
+    .swiper-button-prev {
+        display: none !important;
+    } */
+}
+
+body.no-scroll {
+    overflow: hidden;
+}
+
+.fullscreen-overlay {
+    -webkit-overflow-scrolling: touch;
+    overflow: auto;
+}
+
+.login-box {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: white;
+    padding: 2rem;
+    border-radius: 10px;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+    text-align: center;
+    z-index: 1000;
+}
+
+.line-login-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #00B900;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 16px;
+    margin-top: 20px;
+}
+
+.line-login-btn img {
+    width: 24px;
+    height: 24px;
+    margin-right: 8px;
+}
+
+/* 年份工作列樣式 */
+.year-toolbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 52px;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 100;
+    border-bottom: 1px solid rgba(146, 183, 223, 0.2);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.03);
+}
+
+.year-scroll {
+    width: 100%;
+    height: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.year-scroll::-webkit-scrollbar {
+    display: none;
+}
+
+.year-btn {
+    padding: 6px 16px;
+    border: none;
+    border-radius: 16px;
+    background: rgba(146, 183, 223, 0.15);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: #555;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    white-space: nowrap;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    letter-spacing: 0.3px;
+    box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.06),
+        0 1px 2px rgba(0, 0, 0, 0.04),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.6),
+        inset 0 -1px 2px rgba(0, 0, 0, 0.04),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.year-btn:hover {
+    background: rgba(146, 183, 223, 0.25);
+    transform: translateY(-2px);
+    box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.08),
+        0 2px 4px rgba(0, 0, 0, 0.06),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7),
+        inset 0 -1px 3px rgba(0, 0, 0, 0.06),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.year-btn.active {
+    background: #02a568;
+    color: white;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    box-shadow:
+        0 4px 16px rgba(2, 165, 104, 0.3),
+        0 2px 6px rgba(0, 0, 0, 0.1),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.8),
+        inset 0 -1px 3px rgba(0, 0, 0, 0.1),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.4);
+    transform: translateY(-1px);
+}
+
+/* 添加漸變邊緣效果 */
+.year-toolbar::before,
+.year-toolbar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 24px;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.year-toolbar::before {
+    left: 0;
+    background: linear-gradient(to right, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0));
+}
+
+.year-toolbar::after {
+    right: 0;
+    background: linear-gradient(to left, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0));
+}
+
+/* 調整主要內容區域的上邊距 */
+#albums-container {
+    margin-top: 72px;
+    width: 80%;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* 調整登入框的位置 */
+#login-container {
+    margin-top: 52px;
+}
+
+/* 工具列容器 */
+.toolbar-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    position: relative;
+    /* padding: 0 16px; */
+}
+
+/* 年份滾動區域 */
+.year-scroll {
+    flex: 1;
+    max-width: 100%;
+}
+
+/* 標題文字 */
+.toolbar-title {
+    /* position: absolute;
+    left: 50%; */
+    /* transform: translateX(-50%); */
+    color: #333;
+    font-size: 18px;
+    font-weight: bold;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+/* 用戶頭像區域 */
+.user-profile {
+    position: relative;
+    margin-left: auto;
+}
+
+.profile-image {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    overflow: hidden;
+    cursor: pointer;
+    border: 2px solid rgba(146, 183, 223, 0.3);
+    transition: border-color 0.2s ease;
+}
+
+.profile-image:hover {
+    border-color: #92b7df;
+}
+
+.profile-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* 出彈出框 */
+.logout-popup {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+    padding: 8px;
+    margin-top: 8px;
+    display: none;
+    z-index: 101;
+    width: auto;
+    min-width: 100px;
+}
+
+.logout-popup::before {
+    content: '';
+    position: absolute;
+    top: -4px;
+    right: 14px;
+    width: 8px;
+    height: 8px;
+    background: white;
+    transform: rotate(45deg);
+    box-shadow: -2px -2px 3px rgba(0, 0, 0, 0.04);
+}
+
+.logout-popup.show {
+    display: block;
+}
+
+.logout-btn {
+    background: none;
+    border: none;
+    padding: 8px 16px;
+    color: #666;
+    font-size: 14px;
+    cursor: pointer;
+    width: 100%;
+    text-align: center;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    min-width: 80px;
+}
+
+.logout-btn:hover {
+    background: #f5f5f5;
+    color: #333;
+}
+
+/* 手機版隱藏標題和頭像 */
+@media (max-width: 768px) {
+
+    .toolbar-title,
+    .user-profile {
+        display: none;
+    }
+}
+
+/* 月份導航按鈕樣式 */
+.month-navigation {
+    position: fixed;
+    top: 50%;
+    left: 0;
+    right: 0;
+    transform: translateY(-50%);
+    z-index: 90;
+    pointer-events: none;
+    padding: 0 20px;
+}
+
+.nav-btn {
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(146, 183, 223, 0.3);
+    border-radius: 30px;
+    padding: 12px 20px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #666;
+    transition: all 0.3s ease;
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.nav-btn:hover {
+    background: rgba(146, 183, 223, 0.1);
+    transform: translateY(-50%) scale(1.05);
+}
+
+.prev-month {
+    left: 20px;
+}
+
+.next-month {
+    right: 20px;
+}
+
+.arrow {
+    font-size: 18px;
+    line-height: 1;
+}
+
+.month-label {
+    font-weight: 500;
+}
+
+@media (max-width: 768px) {
+    .month-navigation {
+        display: none;
+    }
+}
+
+/* 修改相簿容器樣式 */
+#albums-container {
+    transition: transform 0.3s ease;
+}
+
+.album {
+    display: none;
+}
+
+.album.active {
+    display: block;
+}
+
+/* 工具列過濾效果 */
+.year-toolbar {
+    transform: translateY(0);
+    transition: transform 0.3s ease;
+}
+
+.year-toolbar.hidden {
+    transform: translateY(-100%);
+}
+
+/* 日期列樣式 */
+.date-bar {
+    position: fixed;
+    bottom: var(--desktop-toolbar-bottom);
+    left: 50%;
+    transform: translateX(-50%);
+    height: 56px;
+    width: var(--desktop-toolbar-width);
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 99;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    border-radius: 28px;
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.1),
+        0 2px 8px rgba(0, 0, 0, 0.06),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.8),
+        inset 0 4px 20px rgba(255, 255, 255, 0.4),
+        inset 0 -2px 8px rgba(0, 0, 0, 0.06),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.4);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: transform;
+}
+
+.date-bar.visible {
+    transform: translateY(0);
+}
+
+.current-date {
+    font-size: 22px;
+    font-weight: 700;
+    color: #2c3e50;
+    padding: 0 16px;
+    white-space: nowrap;
+    letter-spacing: -0.3px;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+.current-date:hover {
+    color: #34495e;
+}
+
+/* 日期选择器样式 */
+.date-picker {
+    position: fixed;
+    bottom: calc(var(--desktop-toolbar-bottom) + 56px + 12px);
+    left: 50%;
+    transform: translateX(-50%) scale(0);
+    background: rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-radius: 20px;
+    padding: 24px;
+    width: 360px;
+    height: 350px;
+    overflow: visible;
+    z-index: 101;
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.15),
+        0 4px 12px rgba(0, 0, 0, 0.1),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.8),
+        inset 0 4px 20px rgba(255, 255, 255, 0.4),
+        inset 0 -2px 8px rgba(0, 0, 0, 0.06),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.4);
+    opacity: 0;
+    visibility: hidden;
+    will-change: transform, opacity, visibility;
+    transition: opacity 0.2s ease, visibility 0.2s ease, transform 0.2s ease;
+    pointer-events: none;
+}
+
+.date-picker.show {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) scale(1);
+    pointer-events: auto;
+}
+
+.date-picker.hide {
+    opacity: 0;
+    visibility: hidden;
+    transform: translateX(-50%) scale(0.9);
+}
+
+
+
+
+
+.date-picker-header {
+    text-align: center;
+    margin-bottom: 16px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #2c3e50;
+}
+
+.date-picker-years {
+    display: flex;
+    gap: 8px;
+    margin: 0 -8px 20px -8px;
+    overflow-x: auto;
+    overflow-y: visible;
+    padding: 6px 8px 12px 8px;
+    white-space: nowrap;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.date-picker-years::-webkit-scrollbar {
+    display: none;
+}
+
+.date-picker-year {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.6);
+    color: #2c3e50;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    box-shadow:
+        0 2px 6px rgba(0, 0, 0, 0.05),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-width: 80px;
+}
+
+.date-picker-year:hover {
+    background: rgba(255, 255, 255, 0.8);
+    transform: translateY(-1px);
+    box-shadow:
+        0 4px 8px rgba(0, 0, 0, 0.08),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.date-picker-year.selected {
+    background: #02a568;
+    color: white;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    box-shadow:
+        0 4px 12px rgba(2, 165, 104, 0.3),
+        0 2px 4px rgba(0, 0, 0, 0.1),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.date-picker-months {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    height: 222px;
+    align-content: start;
+}
+
+.date-picker-month {
+    padding: 12px 8px;
+    border: none;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.6);
+    color: #2c3e50;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    box-shadow:
+        0 2px 6px rgba(0, 0, 0, 0.05),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    text-align: center;
+}
+
+.date-picker-month:hover {
+    background: rgba(255, 255, 255, 0.8);
+    transform: translateY(-1px);
+    box-shadow:
+        0 4px 8px rgba(0, 0, 0, 0.08),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.date-picker-month.selected {
+    background: #02a568;
+    color: white;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    box-shadow:
+        0 4px 12px rgba(2, 165, 104, 0.3),
+        0 2px 4px rgba(0, 0, 0, 0.1),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.date-picker-month.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.date-nav-btn {
+    background: none;
+    border: none;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    color: #2c3e50;
+    opacity: 0.8;
+    padding: 0;
+    pointer-events: auto;
+}
+
+.date-nav-btn:hover {
+    opacity: 1;
+    transform: scale(1.1);
+}
+
+.date-nav-btn:disabled {
+    display: none;
+}
+
+.date-nav-btn.inactive {
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.8);
+}
+
+.arrow-svg {
+    width: 28px;
+    height: 28px;
+    fill: currentColor;
+}
+
+/* 移除原有的月份導航按鈕 */
+.month-navigation {
+    display: none;
+}
+
+/* 修改相簿容器的底部間距 */
+#albums-container {
+    padding-bottom: 100px;
+    /* 增加底部間距 */
+    min-height: 100vh;
+}
+
+/* 手機版樣式優化 */
+@media (max-width: 768px) {
+
+    /* 年份工具列相關 */
+    .year-toolbar {
+        height: 48px;
+    }
+
+    .year-btn {
+        padding: 5px 14px;
+        font-size: 12px;
+        height: 28px;
+        border-radius: 14px;
+        /* 手機版保持相同的 liquid glass 效果 */
+        box-shadow:
+            0 2px 6px rgba(0, 0, 0, 0.06),
+            0 1px 2px rgba(0, 0, 0, 0.04),
+            inset 0 0 0 1px rgba(255, 255, 255, 0.2),
+            inset 0 1px 0 rgba(255, 255, 255, 0.6),
+            inset 0 -1px 2px rgba(0, 0, 0, 0.04),
+            inset 0 -1px 0 rgba(255, 255, 255, 0.3);
+    }
+
+    .year-scroll {
+        padding: 0 12px;
+        gap: 6px;
+        max-width: 100%;
+    }
+
+    /* 相簿容器相關 */
+    #albums-container {
+        margin-top: 68px;
+        width: 100%;
+        padding-bottom: calc(var(--mobile-toolbar-height) + var(--mobile-toolbar-bottom) + 50px);
+        /* 確保底部有足夠空間 */
+    }
+
+    /* 照片網格相關 */
+    .photo-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 5px;
+    }
+
+    .photo-item.large {
+        grid-column: span 2;
+        grid-row: span 2;
+    }
+
+    /* 時間工具列相關 - 調整寬度為圓形按鈕留出空間 */
+    .date-bar {
+        width: 60%;
+        max-width: none;
+        bottom: var(--mobile-toolbar-bottom);
+        height: var(--mobile-toolbar-height);
+        padding: 0 24px;
+        border-radius: 32px;
+        /* 右對齊，留出左側空間給聖誕按鈕 */
+        right: var(--mobile-toolbar-padding);
+        left: auto;
+        transform: none;
+        /* 手機版 liquid glass 效果 */
+        background: rgba(255, 255, 255, 0.6);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        box-shadow:
+            0 8px 32px rgba(0, 0, 0, 0.1),
+            0 2px 8px rgba(0, 0, 0, 0.06),
+            inset 0 0 0 1px rgba(255, 255, 255, 0.3),
+            inset 0 1px 0 rgba(255, 255, 255, 0.8),
+            inset 0 6px 24px rgba(255, 255, 255, 0.45),
+            inset 0 -2px 8px rgba(0, 0, 0, 0.06),
+            inset 0 -1px 0 rgba(255, 255, 255, 0.4);
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .date-nav-btn {
+        width: 48px;
+        /* 增加按鈕大小 */
+        height: 48px;
+        margin: 0 8px;
+    }
+
+    .current-date {
+        font-size: 22px;
+        /* 增加字體大小 */
+        font-weight: 700;
+        padding: 0 16px;
+    }
+
+    .arrow {
+        font-size: 28px;
+    }
+
+    /* 導航箭頭相關 */
+    .swiper-button-next,
+    .swiper-button-prev {
+        display: none !important;
+    }
+
+    /* 月份導航相關 */
+    .month-navigation {
+        display: none;
+    }
+
+    /* 其他元素關 */
+    .album {
+        padding: 0 5px;
+    }
+
+    .toolbar-title,
+    .user-profile {
+        display: none;
+    }
+
+    /* 手机版日期选择器样式 */
+    .date-picker {
+        width: min(320px, calc(100vw - 40px));
+        height: 300px;
+        padding: 20px;
+        bottom: calc(var(--mobile-toolbar-bottom) + var(--mobile-toolbar-height) + 8px);
+        border-radius: 18px;
+    }
+
+
+
+    .date-picker-years {
+        gap: 6px;
+        margin: 0 -6px 16px -6px;
+        padding: 6px 6px 10px 6px;
+    }
+
+    .date-picker-year {
+        padding: 8px 14px;
+        font-size: 13px;
+        border-radius: 10px;
+        min-width: 75px;
+    }
+
+    .date-picker-months {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        height: 178px;
+    }
+
+    .date-picker-month {
+        padding: 12px 8px;
+        font-size: 13px;
+        border-radius: 10px;
+    }
+}
+
+/* 在 style 標籤中添加登入相關樣式 */
+.login-box {
+    width: 100%;
+    max-width: 420px;
+    padding: 2rem;
+    background: white;
+    border-radius: 1rem;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+.login-box img {
+    width: 100%;
+    margin-bottom: 1.5rem;
+}
+
+.line-login-btn {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    background: #00B900;
+    color: white;
+    font-weight: 600;
+    padding: 0.875rem 1.5rem;
+    border-radius: 0.75rem;
+    border: none;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    overflow: hidden;
+}
+
+.line-login-btn:hover {
+    background: #009900;
+    box-shadow: 0 10px 20px -3px rgba(0, 0, 0, 0.2), 0 6px 8px -2px rgba(0, 0, 0, 0.1);
+    transform: translateY(-2px);
+}
+
+.line-login-btn img {
+    width: 24px;
+    height: 24px;
+    margin-right: 0.75rem;
+    margin-bottom: 0;
+}
+
+.line-login-btn.shine::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -100%;
+    width: 50%;
+    height: 200%;
+    background: linear-gradient(to right,
+            rgba(255, 255, 255, 0) 0%,
+            rgba(255, 255, 255, 0.2) 50%,
+            rgba(255, 255, 255, 0) 100%);
+    transform: rotate(25deg);
+    animation: shine 2s infinite;
+}
+
+@keyframes shine {
+    0% {
+        left: -100%;
+    }
+
+    100% {
+        left: 150%;
+    }
+}
+
+/* 登入頁面專用的動態背景樣式 */
+.login-page-background {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(45deg, #3498db, #2ecc71);
+    z-index: -1;
+    overflow: hidden;
+}
+
+.login-page-background::before {
+    content: '';
+    position: absolute;
+    width: 200%;
+    height: 200%;
+    top: -50%;
+    left: -50%;
+    background: radial-gradient(circle at center, transparent 30%, rgba(255, 255, 255, 0.2) 70%);
+    animation: rotate 20s linear infinite;
+}
+
+.login-page-background::after {
+    content: '';
+    position: absolute;
+    width: 200%;
+    height: 200%;
+    top: -50%;
+    left: -50%;
+    background: radial-gradient(circle at center, rgba(255, 255, 255, 0.1) 30%, transparent 70%);
+    animation: rotate 15s linear infinite reverse;
+}
+
+@keyframes rotate {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* 修改登入框樣式以配合新背景 */
+.login-box {
+    width: 100%;
+    max-width: 420px;
+    padding: 2.5rem;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 1.2rem;
+    box-shadow:
+        0 20px 40px rgba(0, 0, 0, 0.1),
+        0 0 0 1px rgba(255, 255, 255, 0.5) inset;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+/* 登入按鈕在新背景下的樣式調整 */
+.line-login-btn {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    background: #00B900;
+    color: white;
+    font-weight: 600;
+    padding: 1rem 1.5rem;
+    border-radius: 0.8rem;
+    border: none;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    overflow: hidden;
+    box-shadow: 0 4px 15px rgba(0, 185, 0, 0.3);
+}
+
+.line-login-btn:hover {
+    background: #00a000;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 185, 0, 0.4);
+}
+
+/* 開發團隊署名樣式 */
+.developer-credit {
+    position: fixed;
+    /* 固定位置，不隨頁面滾動 */
+    bottom: 20px;
+    /* 距離底部 20px */
+    right: 20px;
+    /* 距離右側 20px */
+    color: rgba(255, 255, 255, 0.8);
+    /* 白色半透明文字 */
+    font-size: 14px;
+    /* 文字大小 */
+    font-weight: 300;
+    /* 文字粗細程度 - 較細 */
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    /* 文字陰影效果，提高可讀性 */
+    z-index: 1001;
+    /* 確保顯示在其他元素之上 */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    /* 系統預設字體 */
+}
+
+/* 手機版署名樣式調整 */
+@media (max-width: 768px) {
+    .developer-credit {
+        font-size: 12px;
+        /* 手機版字體稍微縮小 */
+        bottom: 15px;
+        /* 調整手機版下方間距 */
+        right: 15px;
+        /* 調整手機版右側間距 */
+    }
+}
+
+/* 進入畢業專題頁面的按鈕樣式 */
+@media (min-width: 768px) {
+    .graduation-button {
+        position: fixed;
+        right: calc(50% - var(--desktop-toolbar-width) - 65px);
+        bottom: var(--desktop-toolbar-bottom);
+        width: calc(160px * 1.2);
+        height: calc(90px * 1.2);
+        transition: all 0.3s ease;
+        z-index: 999; /* 要小於大圖瀏覽，不要覆蓋在它上面 */
+    }
+
+    .graduation-button img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+        filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.2));
+        transition: filter 0.3s ease, transform 0.3s ease;
+    }
+
+    .graduation-button:hover img {
+        transform: translateY(-5px);
+        filter: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.3));
+    }
+}
+
+/* 電子賀卡相關樣式 */
+@keyframes floatUp {
+    0% {
+        opacity: 0;
+        transform: translateY(100vh);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.christmas-card-btn {
+    position: fixed;
+    bottom: var(--desktop-toolbar-bottom);
+    left: calc(50% - var(--desktop-toolbar-width)/2 - 84px);
+    width: 56px;
+    height: 56px;
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: none;
+    border-radius: 50%;
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.1),
+        0 2px 8px rgba(0, 0, 0, 0.06),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.3),
+        inset 0 2px 0 rgba(255, 255, 255, 0.8),
+        inset 0 4px 16px rgba(255, 255, 255, 0.5),
+        inset 0 -2px 8px rgba(0, 0, 0, 0.06),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.4);
+    z-index: 100;
+    cursor: pointer;
+    padding: 0;
+    animation: floatUp 1s ease-out forwards;
+    opacity: 0;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: transform;
+}
+
+.christmas-card-btn::before {
+    content: '🎓';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 24px;
+    line-height: 1;
+}
+
+.christmas-card-btn:hover {
+    transform: scale(1.1) translateY(-2px);
+    background: rgba(255, 255, 255, 0.75);
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.12),
+        0 4px 12px rgba(0, 0, 0, 0.08),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.4),
+        inset 0 3px 0 rgba(255, 255, 255, 0.9),
+        inset 0 6px 18px rgba(255, 255, 255, 0.6),
+        inset 0 -3px 10px rgba(0, 0, 0, 0.08),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.5);
+}
+
+/* 手機版樣式 */
+@media (max-width: 768px) {
+    .christmas-card-btn {
+        bottom: var(--mobile-toolbar-bottom);
+        left: calc(50% - var(--mobile-toolbar-width)/2 - 35px);
+        width: var(--mobile-toolbar-height);
+        height: var(--mobile-toolbar-height);
+    }
+
+    .christmas-card-btn::before {
+        font-size: 28px;
+    }
+
+    .christmas-card-btn:hover {
+        transform: scale(1.05) translateY(-1px);
+        /* 手機版 liquid glass 悬停效果 */
+        background: rgba(255, 255, 255, 0.75);
+        box-shadow:
+            0 12px 40px rgba(0, 0, 0, 0.12),
+            0 4px 12px rgba(0, 0, 0, 0.08),
+            inset 0 0 0 1px rgba(255, 255, 255, 0.4),
+            inset 0 3px 0 rgba(255, 255, 255, 0.9),
+            inset 0 8px 20px rgba(255, 255, 255, 0.65),
+            inset 0 -3px 10px rgba(0, 0, 0, 0.08),
+            inset 0 -1px 0 rgba(255, 255, 255, 0.5);
+    }
+}
+
+
+
+/* 說明 Modal 樣式 */
+.card-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+
+.card-modal.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+.card-modal-content {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0);
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    padding: 20px;
+    border-radius: 20px;
+    max-width: 80%;
+    width: 400px;
+    text-align: center;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease, visibility 0.2s ease, transform 0.2s ease;
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.15),
+        0 4px 12px rgba(0, 0, 0, 0.1),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.8),
+        inset 0 4px 20px rgba(255, 255, 255, 0.4),
+        inset 0 -2px 8px rgba(0, 0, 0, 0.06),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.card-modal.show .card-modal-content {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+.modal-close-btn {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    width: 30px;
+    height: 30px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-size: 24px;
+    color: #666;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    border-radius: 50%;
+    padding: 0;
+}
+
+.modal-close-btn:hover {
+    color: #333;
+    background: #f5f5f5;
+    transform: rotate(90deg);
+}
+
+.card-modal-content h3 {
+    margin-bottom: 20px;
+    color: #2c3e50;
+    font-size: 28px;
+    font-weight: 700;
+}
+
+.card-modal-content p {
+    margin-bottom: 25px;
+    color: #34495e;
+    line-height: 1.6;
+}
+
+.understand-btn {
+    background: linear-gradient(180deg, rgba(46, 204, 113, 0.9), rgba(46, 204, 113, 0.8));
+    color: white;
+    border: none;
+    padding: 10px 25px;
+    border-radius: 25px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(59, 59, 59, 0.3);
+    position: relative;
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+}
+
+.understand-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 40%;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.3), transparent);
+    border-radius: 25px 25px 0 0;
+}
+
+.understand-btn:hover {
+    transform: scale(1.05);
+}
+
+/* 照片選擇相關樣式 */
+.photo-select-circle {
+    display: none; /* 預設隱藏 */
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    border: 2px solid rgba(255, 255, 255, 0.8);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.3);
+    cursor: pointer;
+    z-index: 2;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(0, 0, 0, 0.6);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    transition: all 0.2s ease;
+}
+
+.photo-select-circle.selected {
+    background: #02a568;
+    border-color: #02a568;
+    color: white;
+    box-shadow: 0 3px 8px rgba(2, 165, 104, 0.4);
+}
+
+/* 賀卡工具列按鈕樣式 */
+.card-toolbar {
+    display: none;
+    position: fixed;
+    bottom: calc(var(--mobile-toolbar-bottom) + 80px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 99;
+    width: var(--desktop-toolbar-width);
+    gap: 12px;
+}
+
+.card-status-btn {
+    flex: 1;
+    padding: 16px 28px;
+    background: #f5f0ea;
+    color: rgb(0, 0, 0);
+    border: none;
+    border-radius: 28px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(58, 58, 58, 0.3);
+    position: relative;
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+    font-size: 19px;
+    font-weight: 600;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 200px;
+    letter-spacing: 0.5px;
+}
+
+.card-status-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 40%;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.3), transparent);
+    border-radius: 28px 28px 0 0;
+}
+
+.card-status-btn:hover {
+    /* background: linear-gradient(180deg, rgba(39, 174, 96, 0.9), rgba(39, 174, 96, 0.8)); */
+    transform: scale(1.1);
+    box-shadow: 0 4px 15px rgba(58, 58, 58, 0.3);
+}
+/* .card-status-btn.ready {
+    background: linear-gradient(180deg, rgba(46, 204, 113, 0.9), rgba(46, 204, 113, 0.8));
+    color: white;
+} */
+
+/* .card-status-btn.ready:hover {
+    background: linear-gradient(180deg, rgba(39, 174, 96, 0.9), rgba(39, 174, 96, 0.8));
+    transform: scale(1.05);
+    box-shadow: 0 6px 20px rgba(46, 204, 113, 0.4);
+} */
+
+.close-card-btn {
+    width: 56px;
+    height: 56px;
+    min-width: 56px; /* 確保維持正圓形 */
+    background: rgba(255, 255, 255, 0.85);
+    color: #333;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 36px;
+    font-weight: 300;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 
+        0 4px 24px rgba(0, 0, 0, 0.1),
+        0 1px 2px rgba(255, 255, 255, 0.3),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0; /* 確保內容居中 */
+    line-height: 1; /* 確保 X 符號垂直居中 */
+}
+
+.close-card-btn:hover {
+    transform: translateY(-2px) rotate(90deg);
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 
+        0 8px 32px rgba(0, 0, 0, 0.15),
+        0 1px 2px rgba(255, 255, 255, 0.4),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+
+@media (max-width: 768px) {
+    .card-toolbar {
+        bottom: calc(var(--mobile-toolbar-bottom) + 80px);
+        width: calc(95% - var(--mobile-toolbar-padding));
+        max-width: none;
+    }
+
+    body.card-selecting-mode .date-bar {
+        width: 80%;
+    }
+}
+
+/* 魔法文字效果 */
+.magic-text {
+    animation: background-pan 3s linear infinite;
+    background: linear-gradient(to right,
+            var(--red),
+            var(--violet),
+            var(--purple),
+            var(--red));
+    background-size: 200%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-size: 20px;
+    font-weight: 600;
+}
+@keyframes background-pan {
+    from {
+        background-position: 0% center;
+    }
+
+    to {
+        background-position: -200% center;
+    }
+}
+
+.card-templates-container {
+    width: auto;
+    overflow-x: auto;
+    margin: 20px -20px;
+    padding: 10px 20px;
+    white-space: nowrap;
+    position: relative;
+    /* scrollbar-width: thin;
+    scrollbar-color: #89b755 #f0f0f0; */
+}
+
+/* 移除之前的漸變陰影 */
+.card-templates-container::before,
+.card-templates-container::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 20px;
+    z-index: 2;
+    pointer-events: none;
+}
+
+/* 自定義 Webkit 瀏覽器的滾動條樣式 */
+.card-templates-container::-webkit-scrollbar {
+    display: none;
+}
+
+.card-templates {
+    display: inline-flex;
+    gap: 8px;
+    padding: 0 4px;
+    padding-bottom: 4px;  /* 為滾動條預留空間 */
+}
+
+.card-template {
+    flex: 0 0 auto;
+    width: 120px;
+    display: flex;
+    flex-direction: column;
+    border-radius: 16px;
+    overflow: hidden;
+    cursor: pointer;
+    position: relative;
+    border: 2px solid transparent;
+    transition: all 0.3s ease;
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    margin-right: 4px;
+    box-shadow:
+        0 4px 16px rgba(0, 0, 0, 0.1),
+        0 1px 4px rgba(0, 0, 0, 0.06),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.3),
+        inset 0 2px 0 rgba(255, 255, 255, 0.8),
+        inset 0 4px 12px rgba(255, 255, 255, 0.4),
+        inset 0 -1px 4px rgba(0, 0, 0, 0.04),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.card-template .image-container {
+    width: 100%;
+    padding-bottom: 150%;  /* 設置固定的寬高比 2:3 */
+    position: relative;  /* 為絕對定位的圖片提供參考 */
+    overflow: hidden;
+    border-radius: 12px 12px 0 0;
+}
+
+.card-template img {
+    position: absolute;  /* 絕對定位 */
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;  /* 確保圖片完整顯示 */
+    background: rgba(255, 255, 255, 0.9);
+}
+
+.card-template-name {
+    padding: 8px;
+    font-size: 13px;
+    text-align: center;
+    color: #333;
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    border-top: 1px solid rgba(255, 255, 255, 0.3);
+    white-space: normal;  /* 允許文字換行 */
+    min-height: 48px;  /* 確保有足夠空間顯示兩行文字 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0 0 12px 12px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+.card-template.selected {
+    border-color: #2ecc71;
+    transform: translateY(-2px);
+    box-shadow:
+        0 6px 20px rgba(46, 204, 113, 0.3),
+        0 2px 8px rgba(0, 0, 0, 0.1),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.4),
+        inset 0 2px 0 rgba(255, 255, 255, 0.9),
+        inset 0 4px 16px rgba(255, 255, 255, 0.5),
+        inset 0 -1px 6px rgba(0, 0, 0, 0.06),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.card-template.selected .card-template-name {
+    color: #2ecc71;
+    font-weight: 500;
+}
+
+.understand-btn:disabled {
+    background: linear-gradient(180deg, rgba(189, 195, 199, 0.9), rgba(189, 195, 199, 0.8));
+    cursor: not-allowed;
+    transform: none;
+}
+
+.understand-btn:disabled:hover {
+    transform: none;
+    box-shadow: 0 4px 15px rgba(189, 195, 199, 0.3);
+}
+
+/* 選中照片的邊框效果 */
+.photo-item.selected {
+    box-shadow: inset 0 0 0 4px #02a568;
+    border-radius: 8px; /* 確保與 photo-item 的圓角一致 */
+}
+
+.photo-item.selected img {
+    transform: scale(0.95);
+}
+
+/* 添加過渡動畫樣式 */
+.dramatic-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0);
+    z-index: 9999;
+    transition: background 0.8s ease;
+    display: none;  /* 只保留一個 display 屬性，預設為隱藏 */
+    justify-content: center;
+    align-items: center;
+}
+
+.dramatic-message {
+    color: white;
+    font-size: 32px;
+    font-weight: bold;
+    opacity: 0;
+    transform: scale(0.8);
+    transition: all 0.5s ease;
+    text-align: center;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+.dramatic-overlay.show {
+    background: rgba(0, 0, 0, 0.85);
+}
+
+.dramatic-overlay.show .dramatic-message {
+    opacity: 1;
+    transform: scale(1);
+}
+
+@keyframes sparkle {
+    0% { text-shadow: 0 0 10px rgba(255, 255, 255, 0.8); }
+    50% { text-shadow: 0 0 20px rgba(255, 255, 255, 1), 0 0 30px rgba(255, 255, 255, 0.5); }
+    100% { text-shadow: 0 0 10px rgba(255, 255, 255, 0.8); }
+}
+
+.dramatic-message.sparkle {
+    animation: sparkle 1.5s ease infinite;
+    color: #FFD700;
+    font-size: 40px;
+}
+
+/* 下載選項樣式 */
+.download-options {
+    position: absolute;
+    bottom: 100%;
+    right: 0;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+    padding: 8px 0;
+    margin-bottom: 8px;
+    display: none;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.download-options::before {
+    content: '';
+    position: absolute;
+    bottom: -4px;
+    right: 20px;
+    width: 8px;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.95);
+    transform: rotate(45deg);
+    box-shadow: 2px 2px 3px rgba(0, 0, 0, 0.1);
+}
+
+.download-option {
+    padding: 10px 20px;
+    color: #333;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+    font-size: 0.9rem;
+}
+
+.download-option:hover {
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.download-options.show {
+    display: block;
+    animation: fadeInUp 0.2s ease-out;
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+body.favorites-view-active .date-bar {
+    display: none;
+}
+
+.favorite-button {
+    padding: 12px;
+    width: 56px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative; /* 添加相對定位，便於子元素絕對定位 */
+}
+
+.heart-icon {
+    width: 24px;
+    height: 24px;
+    stroke: #2c3e50;
+    fill: none;
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    position: absolute; /* 使用絕對定位以精確控制位置 */
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%); /* 完美居中的方法 */
+    margin: 0;
+}
+
+.favorite-button.active .heart-icon {
+    stroke: #ff4d4d;
+    fill: #ff4d4d;
+    transform: translate(-50%, -50%) scale(1.2); /* 保留居中的同時添加縮放效果 */
+}
+
+/* Preloader Styles */
+#preloader {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: #ffffff;
+    z-index: 9999;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: opacity 0.5s ease, visibility 0.5s ease;
+    will-change: opacity, visibility;
+    /* 防止 LIFF 造成的佈局偏移 */
+    transform: translateZ(0);
+    backface-visibility: hidden;
+}
+
+#app-wrapper {
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    will-change: opacity, visibility;
+}
+
+.preloader-spinner {
+    border: 4px solid rgba(0, 0, 0, 0.1);
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border-left-color: #00B900;
+    animation: spin 1s ease infinite;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+.preloader-logo {
+    width: 250px;
+    height: auto;
+    opacity: 0;
+    animation: pulse 1.5s ease-in-out infinite;
+    transition: opacity 0.3s ease;
+    /* 防止圖片載入時的佈局偏移 */
+    will-change: opacity;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+}
+
+.preloader-logo.loaded {
+    opacity: 1;
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 0.6;
+    }
+    50% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0.6;
+    }
+}
+
+/* 新增的影片容器 placeholder 樣式 */
+.video-container-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #000;
+}
+
+/* Plyr 播放器在 Swiper 中的樣式 */
+.swiper-slide .plyr {
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    --plyr-color-main: #02a568;
+    --plyr-control-icon-color: white;
+    --plyr-range-thumb-height: 0px; /* 隱藏進度條滑塊 */
+    --plyr-range-thumb-width: 0px; /* 隱藏進度條滑塊 */
+    --plyr-range-track-height: 3px; /* 細長的進度條 */
+    --plyr-range-fill-background: #02a568;
+    --plyr-video-control-background-hover: rgba(2, 165, 104, 0.5);
+    --plyr-video-control-color: white;
+    --plyr-video-control-color-hover: white;
+    --plyr-audio-control-color: white;
+}
+
+/* 確保視訊元素適應容器 */
+.swiper-slide .plyr video {
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain; /* 保持原始比例但盡量填滿 */
+}
+
+/* 將 Plyr 容器設為相對定位，以便絕對定位子元素 */
+.swiper-slide .plyr__video-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    padding: 0;
+    margin: 0;
+}
+
+/* 確保 Swiper 幻燈片適合完整高度 */
+.swiper-slide {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+}
+
+/* 配置全螢幕模式的樣式 */
+.fullscreen-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9999;
+    background-color: rgba(0, 0, 0, 0.9);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+/* 配置 Swiper 容器樣式 */
+.swiper {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.swiper-wrapper {
+    height: 100%;
+    display: flex;
+    align-items: center;
+}
+
+/* 影片容器樣式 */
+.video-container-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: transparent;
+    position: relative; /* 確保可以相對定位進度條 */
+}
+
+/* Instagram風格的進度條 - 簡單細長條，位於底部 */
+.swiper-slide .plyr__progress {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    z-index: 10;
+    height: 3px; /* 細長的進度條 */
+    padding: 0;
+    margin: 0;
+    background: rgba(255, 255, 255, 0.3); /* 淺色背景 */
+    opacity: 1; /* 確保進度條始終可見 */
+}
+
+/* 調整進度條內部元素的樣式 */
+.swiper-slide .plyr__progress input[type="range"] {
+    margin: 0;
+    height: 3px;
+    padding: 0;
+}
+
+.swiper-slide .plyr__progress__buffer {
+    margin: 0;
+    height: 3px;
+    padding: 0;
+}
+
+/* 隱藏提示工具 */
+.swiper-slide .plyr__tooltip {
+    display: none;
+}
+
+/* 隱藏控制列 */
+.swiper-slide .plyr__controls {
+    display: none !important;
+}
+
+/* 統一隱藏 Plyr 原有的中央播放按鈕 */
+.plyr__control--overlaid,
+.plyr__control.plyr__control--overlaid,
+.plyr--video .plyr__control.plyr__control--overlaid,
+.plyr--video .plyr__controls button.plyr__control--overlaid,
+.plyr--video .plyr__control--overlaid {
+    display: none !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+}
+
+/* 隱藏自定義播放按鈕 */
+.swiper-slide .plyr:before,
+.swiper-slide .plyr:after,
+.swiper-slide .plyr.plyr--playing:before,
+.swiper-slide .plyr.plyr--playing:after {
+    display: none !important;
+    content: none !important;
+}
+
+/* 影片載入中的樣式 */
+.plyr--loading .plyr__control--overlaid {
+    opacity: 0;
+    visibility: hidden;
+}
+
+/* 調整手機版樣式 */
+@media (max-width: 768px) {
+    .swiper-slide .plyr {
+        width: 100%;
+        height: 100%;
+        max-width: 100%;
+        max-height: 100%;
+        --plyr-color-main: #02a568;
+        --plyr-control-icon-color: white;
+        --plyr-range-thumb-height: 0px;
+        --plyr-range-thumb-width: 0px;
+        --plyr-range-track-height: 3px;
+        --plyr-range-fill-background: #02a568;
+    }
+    
+    .swiper-slide .plyr video {
+        width: 100%;
+        height: 100%;
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+    }
+
+    /* 顯示控制列，但只顯示進度條 */
+    .swiper-slide .plyr__controls {
+        display: flex !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        position: absolute !important;
+        top: -7px !important;
+        left: 0 !important;
+        right: 0 !important;
+        height: 10px !important;
+        padding: 0 10px !important;
+        background: transparent !important;
+    }
+
+    .plyr--video.plyr--hide-controls .plyr__controls {
+        transform: none !important;
+    }
+    
+    /* 隱藏除進度條外的所有控制元素 */
+    .swiper-slide .plyr__controls > *:not(.plyr__progress__container) {
+        display: none !important;
+    }
+    
+    /* 進度條容器樣式 */
+    .swiper-slide .plyr__progress__container {
+        width: 100% !important;
+        height: 3px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        flex: 1 !important;
+    }
+    
+    /* 進度條本身樣式 */
+    .swiper-slide .plyr__progress {
+        width: 100% !important;
+        height: 3px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    
+    /* 進度條背景 */
+    .swiper-slide .plyr__progress:before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: rgba(255, 255, 255, 0.3);
+        z-index: 1;
+    }
+    
+    /* 確保進度指示為綠色 */
+    .swiper-slide .plyr--full-ui input[type=range] {
+        color: #02a568 !important;
+    }
+    
+    /* 調整提示工具位置 */
+    .swiper-slide .plyr__tooltip {
+        bottom: -25px !important;
+        top: auto !important;
+    }
+    
+    /* 隱藏進度條滑塊 */
+    .swiper-slide .plyr--full-ui input[type=range]::-webkit-slider-thumb {
+        width: 0 !important;
+        height: 0 !important;
+        opacity: 0 !important;
+    }
+    
+    .swiper-slide .plyr--full-ui input[type=range]::-moz-range-thumb {
+        width: 0 !important;
+        height: 0 !important;
+        opacity: 0 !important;
+    }
+    
+    .swiper-slide .plyr--full-ui input[type=range]::-ms-thumb {
+        width: 0 !important;
+        height: 0 !important;
+        opacity: 0 !important;
+    }
+}
+
+.video-loading-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-size: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+    z-index: 15;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 20px;
+    border-radius: 10px;
+}
+
+.video-loading-overlay .spinner {
+    width: 32px;
+    height: 32px;
+    border: 4px solid rgba(255, 255, 255, 0.2);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.video-error {
+    color: white;
+    text-align: center;
+}
+
+/* 在照片網格中顯示的影片播放圖標 */
+.photo-item .video-icon {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 48px;
+    height: 48px;
+    z-index: 2;
+    pointer-events: none;
+    opacity: 0.85;
+    transition: opacity 0.2s ease;
+    background-color: rgba(0, 0, 0, 0.7);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.photo-item .video-icon:after {
+    content: "";
+    width: 0;
+    height: 0;
+    border-top: 10px solid transparent;
+    border-bottom: 10px solid transparent;
+    border-left: 18px solid white;
+    margin-left: 3px;
+}
+
+.photo-item:hover .video-icon {
+    opacity: 1;
+    background-color: rgba(0, 0, 0, 0.7);
+}
+
+/* 影片容器與iframe相關樣式 */
+.video-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.swiper-slide .video-container {
+    width: 90%;
+    max-width: 1280px;
+    height: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    background-color: #000;
+    aspect-ratio: 16/9;
+    max-height: calc(100vh - 180px); /* 減去頂部和底部的間隔 */
+    margin: 0 auto; /* 居中顯示 */
+}
+
+.swiper-zoom-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.video-placeholder {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(0, 0, 0, 0.6);
+    transition: opacity 0.5s ease;
+    z-index: 2;
+    background-size: cover;
+    background-position: center;
+}
+
+.video-loading {
+    color: white;
+    font-size: 18px;
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.7);
+    border-radius: 30px;
+    position: absolute;
+    z-index: 3;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    white-space: nowrap;
+    justify-content: center;
+    min-width: 180px;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.video-loading::before {
+    content: '';
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: white;
+    animation: spin 1s linear infinite;
+    margin-right: 12px;
+}
+
+.swiper-slide iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    border: none;
+    transition: opacity 0.5s ease;
+    display: block;
+}
+
+/* 移除不再需要的 iframe 保護層樣式 */
+.iframe-touch-shield {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 2;
+    background-color: transparent;
+    pointer-events: none; /* 預設關閉 */
+}
+
+/* 滑動時啟用保護層 */
+.swiper-container-horizontal .iframe-touch-shield {
+    pointer-events: auto; /* 當在滑動時啟用保護層 */
+}
+
+/* 自定義影片全螢幕按鈕樣式已移至上方統一設定 */
+
+/* 載入動畫中的閃爍點 */
+.loading-dots {
+    display: inline-block;
+    width: 24px;
+    text-align: left;
+    overflow: hidden;
+}
+
+/* 使用偽元素代替內容動畫 */
+.loading-dots::after {
+    content: '.';
+    animation: loadingDots 1.5s infinite;
+}
+
+@keyframes loadingDots {
+    0% { content: '.'; }
+    33% { content: '..'; }
+    66% { content: '...'; }
+    100% { content: '.'; }
+}
+
+/* 手機版樣式調整 */
+@media (max-width: 768px) {
+    .swiper-slide .video-container {
+        width: 100%;
+        aspect-ratio: 9/16;
+        max-width: 100vw;
+        max-height: calc(100vh - 120px);
+        margin-top: 20px;
+        margin-bottom: 20px;
+    }
+    
+    .video-loading {
+        font-size: 16px;
+        padding: 12px 20px;
+        min-width: 150px;
+    }
+    
+    .video-fullscreen-btn {
+        width: 40px;
+        height: 40px;
+        bottom: 12px;
+        right: 12px;
+    }
+    
+    .video-fullscreen-btn svg {
+        width: 20px;
+        height: 20px;
+    }
+}
+
+/* 手機版隱藏關閉按鈕，鼓勵使用手勢關閉 */
+@media (max-width: 768px) {
+    .close-button {
+        display: none !important;
+    }
+}
+
+/* 新增logo旋轉載入動畫樣式 */
+.logo-spinner {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+/* 默認脈動效果 */
+.logo-spinner img {
+    width: 120px;
+    height: auto;
+    animation: logoPulse 1.8s infinite ease-in-out;
+    transform-origin: center center;
+}
+
+/* 搖擺效果類 */
+.logo-spinner.sway img {
+    animation: logoSway 1.5s infinite ease-in-out;
+}
+
+/* 光暈效果類 */
+.logo-spinner.glow img {
+    animation: logoGlow 2s infinite ease-in-out;
+}
+
+/* 波紋效果類 */
+.logo-spinner.ripple img {
+    animation: logoRipple 2s infinite ease-in-out;
+}
+
+@keyframes logoPulse {
+    0% {
+        transform: scale(0.9);
+        opacity: 0.7;
+    }
+    50% {
+        transform: scale(1.05);
+        opacity: 1;
+    }
+    100% {
+        transform: scale(0.9);
+        opacity: 0.7;
+    }
+}
+
+@keyframes logoSway {
+    0% {
+        transform: translateX(-5px);
+        opacity: 0.7;
+    }
+    50% {
+        transform: translateX(5px);
+        opacity: 1;
+    }
+    100% {
+        transform: translateX(-5px);
+        opacity: 0.7;
+    }
+}
+
+@keyframes logoGlow {
+    0% {
+        filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.4));
+        opacity: 0.8;
+        transform: scale(0.97);
+    }
+    50% {
+        filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.8));
+        opacity: 1;
+        transform: scale(1.02);
+    }
+    100% {
+        filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.4));
+        opacity: 0.8;
+        transform: scale(0.97);
+    }
+}
+
+@keyframes logoRipple {
+    0% {
+        box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.4);
+        transform: scale(0.95);
+    }
+    70% {
+        box-shadow: 0 0 0 15px rgba(255, 255, 255, 0);
+        transform: scale(1);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+        transform: scale(0.95);
+    }
+}
