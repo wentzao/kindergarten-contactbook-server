@@ -18,6 +18,7 @@ def ensure_tables():
                 user_id VARCHAR(100) NOT NULL,
                 push_token VARCHAR(200) NOT NULL,
                 device_name VARCHAR(100),
+                role VARCHAR(20) DEFAULT 'parent',
                 created_at VARCHAR(50),
                 updated_at VARCHAR(50),
                 UNIQUE(user_id, push_token)
@@ -30,6 +31,12 @@ def ensure_tables():
                 updated_at VARCHAR(50)
             );
         ''')
+        # Migration: add role column if it doesn't exist
+        try:
+            conn.execute('ALTER TABLE push_tokens ADD COLUMN role VARCHAR(20) DEFAULT \'parent\'')
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
         conn.commit()
     finally:
         conn.close()
@@ -57,18 +64,20 @@ def register_push_token():
         return jsonify({'error': 'userId and pushToken are required'}), 400
 
     device_name = data.get('deviceName', 'Unknown')
+    role = data.get('role', 'parent')  # 'parent', 'teacher', or 'admin'
     now = datetime.now().isoformat()
 
     conn = data_service.get_db()
     try:
         # UPSERT: insert or update
         conn.execute('''
-            INSERT INTO push_tokens (user_id, push_token, device_name, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO push_tokens (user_id, push_token, device_name, role, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id, push_token) DO UPDATE SET
                 device_name = excluded.device_name,
+                role = excluded.role,
                 updated_at = excluded.updated_at
-        ''', (user_id, push_token, device_name, now, now))
+        ''', (user_id, push_token, device_name, role, now, now))
         conn.commit()
         return jsonify({'status': 'ok', 'message': 'Push token registered'}), 200
     except Exception as e:

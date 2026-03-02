@@ -99,6 +99,7 @@ CREATE TABLE push_tokens (
     user_id VARCHAR(100) NOT NULL,
     push_token VARCHAR(200) NOT NULL,
     device_name VARCHAR(100),
+    role VARCHAR(20) DEFAULT 'parent',
     created_at VARCHAR(50),
     updated_at VARCHAR(50),
     UNIQUE(user_id, push_token)
