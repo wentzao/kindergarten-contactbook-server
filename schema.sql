@@ -92,3 +92,22 @@ CREATE TABLE survey_responses (
     submitted_by VARCHAR(100),
     PRIMARY KEY (survey_id, child_id)
 );
+
+DROP TABLE IF EXISTS push_tokens;
+CREATE TABLE push_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id VARCHAR(100) NOT NULL,
+    push_token VARCHAR(200) NOT NULL,
+    device_name VARCHAR(100),
+    created_at VARCHAR(50),
+    updated_at VARCHAR(50),
+    UNIQUE(user_id, push_token)
+);
+
+DROP TABLE IF EXISTS notification_preferences;
+CREATE TABLE notification_preferences (
+    user_id VARCHAR(100) PRIMARY KEY,
+    contact_book_notify BOOLEAN DEFAULT 1,
+    announcement_notify BOOLEAN DEFAULT 1,
+    updated_at VARCHAR(50)
+);
