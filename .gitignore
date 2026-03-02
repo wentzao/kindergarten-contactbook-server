@@ -1,0 +1,11 @@
+# Firebase service account key (DO NOT commit)
+firebase-service-account.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Data
+data/*.db

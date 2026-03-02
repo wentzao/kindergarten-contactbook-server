@@ -1,12 +1,22 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 import json
+import threading
 from services.data_service import DataService
 import os
 
 contact_book_bp = Blueprint('contact_book', __name__)
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 data_service = DataService(DATA_DIR)
+
+# Lazy import to avoid circular imports or missing dependencies
+def _get_notifier():
+    try:
+        from services.send_notification import notify_teachers_new_comment
+        return notify_teachers_new_comment
+    except Exception as e:
+        print(f'[Notification] Failed to import sender: {e}')
+        return None
 
 # Helper to deserialize json fields safely
 def load_json(val):
@@ -285,6 +295,19 @@ def handle_comments(student_id, date):
             conn.execute('UPDATE contact_books SET comments = ?, last_modified = ? WHERE student_id = ? AND date = ?',
                          (json.dumps(comments, ensure_ascii=False), datetime.now().isoformat(), student_id, date))
             conn.commit()
+            
+            # Send push notification to teachers/admins (in background thread)
+            sender_name = comment['name']
+            content_preview = comment['content']
+            student_name = data.get('studentName', student_id)
+            
+            def _send_bg():
+                notify = _get_notifier()
+                if notify:
+                    notify(data_service, student_id, student_name, sender_name, content_preview)
+            
+            threading.Thread(target=_send_bg, daemon=True).start()
+            
             return jsonify(comment), 201
             
     except Exception as e:
