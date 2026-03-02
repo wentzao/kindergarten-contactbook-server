@@ -52,7 +52,7 @@ ensure_tables()
 
 @notification_bp.route('/push-token', methods=['POST'])
 def register_push_token():
-    """Register or update a FCM push token for a user."""
+    """Register a FCM push token. Teachers: 1 token only. Parents: multi-device."""
     data = request.json
     if not data:
         return jsonify({'error': 'No data provided'}), 400
@@ -64,22 +64,44 @@ def register_push_token():
         return jsonify({'error': 'userId and pushToken are required'}), 400
 
     device_name = data.get('deviceName', 'Unknown')
-    role = data.get('role', 'parent')  # 'parent', 'teacher', or 'admin'
+    role = data.get('role', 'parent')
     now = datetime.now().isoformat()
 
     conn = data_service.get_db()
     try:
-        # UPSERT: insert or update
-        conn.execute('''
-            INSERT INTO push_tokens (user_id, push_token, device_name, role, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(user_id, push_token) DO UPDATE SET
-                device_name = excluded.device_name,
-                role = excluded.role,
-                updated_at = excluded.updated_at
-        ''', (user_id, push_token, device_name, role, now, now))
+        if role in ('teacher', 'admin'):
+            # Teachers/admins: only keep the LATEST token (1 device per user per role)
+            conn.execute('DELETE FROM push_tokens WHERE user_id = ? AND role = ?', (user_id, role))
+            conn.execute('''
+                INSERT INTO push_tokens (user_id, push_token, device_name, role, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (user_id, push_token, device_name, role, now, now))
+        else:
+            # Parents: allow multiple devices (UPSERT by user_id + push_token)
+            conn.execute('''
+                INSERT INTO push_tokens (user_id, push_token, device_name, role, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, push_token) DO UPDATE SET
+                    device_name = excluded.device_name,
+                    role = excluded.role,
+                    updated_at = excluded.updated_at
+            ''', (user_id, push_token, device_name, role, now, now))
         conn.commit()
         return jsonify({'status': 'ok', 'message': 'Push token registered'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@notification_bp.route('/push-token/clear-all', methods=['POST', 'DELETE'])
+def clear_all_tokens():
+    """Clear all push tokens (admin use)."""
+    conn = data_service.get_db()
+    try:
+        conn.execute('DELETE FROM push_tokens')
+        conn.commit()
+        return jsonify({'status': 'ok', 'message': 'All push tokens cleared'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
