@@ -30,6 +30,13 @@ def ensure_tables():
                 announcement_notify BOOLEAN DEFAULT 1,
                 updated_at VARCHAR(50)
             );
+
+            CREATE TABLE IF NOT EXISTS teacher_comment_reads (
+                teacher_id VARCHAR(100) NOT NULL,
+                student_id VARCHAR(100) NOT NULL,
+                last_read_at VARCHAR(50) NOT NULL,
+                PRIMARY KEY (teacher_id, student_id)
+            );
         ''')
         # Migration: add role column if it doesn't exist
         try:
@@ -207,3 +214,91 @@ def update_preferences():
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
+
+
+# ==========================================
+# Unread Comment Counts
+# ==========================================
+
+@notification_bp.route('/unread-comments/<teacher_id>', methods=['GET'])
+def get_unread_comments(teacher_id):
+    """
+    Get unread parent comment counts per student + unread dates.
+    Returns: { "counts": { "studentId": count }, "dates": { "studentId": ["2026-03-03", ...] } }
+    """
+    import json
+    conn = data_service.get_db()
+    try:
+        # Get all contact book entries that have comments
+        rows = conn.execute(
+            "SELECT student_id, date, comments FROM contact_books WHERE comments IS NOT NULL AND comments != '[]'"
+        ).fetchall()
+
+        # Get teacher's last-read timestamps
+        reads = conn.execute(
+            'SELECT student_id, last_read_at FROM teacher_comment_reads WHERE teacher_id = ?',
+            (teacher_id,)
+        ).fetchall()
+        last_read_map = {r['student_id']: r['last_read_at'] for r in reads}
+
+        # Count unread comments per student + collect dates
+        unread_counts = {}
+        unread_dates = {}
+        for row in rows:
+            student_id = row['student_id']
+            record_date = row['date']
+            try:
+                comments = json.loads(row['comments']) if row['comments'] else []
+            except:
+                continue
+
+            last_read = last_read_map.get(student_id, '1970-01-01')
+
+            # Count parent comments newer than last_read
+            unread = sum(
+                1 for c in comments
+                if c.get('senderId', 'parent') == 'parent'
+                and c.get('createdAt', '') > last_read
+            )
+
+            if unread > 0:
+                unread_counts[student_id] = unread_counts.get(student_id, 0) + unread
+                if student_id not in unread_dates:
+                    unread_dates[student_id] = []
+                unread_dates[student_id].append(record_date)
+
+        return jsonify({'counts': unread_counts, 'dates': unread_dates}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@notification_bp.route('/mark-comments-read', methods=['POST'])
+def mark_comments_read():
+    """Mark comments as read for a teacher + student."""
+    data = request.json
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    teacher_id = data.get('teacherId')
+    student_id = data.get('studentId')
+    if not teacher_id or not student_id:
+        return jsonify({'error': 'teacherId and studentId required'}), 400
+
+    now = datetime.now().isoformat()
+    conn = data_service.get_db()
+    try:
+        conn.execute('''
+            INSERT INTO teacher_comment_reads (teacher_id, student_id, last_read_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(teacher_id, student_id) DO UPDATE SET
+                last_read_at = excluded.last_read_at
+        ''', (teacher_id, student_id, now))
+        conn.commit()
+        return jsonify({'status': 'ok'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+

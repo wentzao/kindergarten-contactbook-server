@@ -304,7 +304,7 @@ def handle_comments(student_id, date):
             def _send_bg():
                 notify = _get_notifier()
                 if notify:
-                    notify(data_service, student_id, student_name, sender_name, content_preview)
+                    notify(data_service, student_id, student_name, sender_name, content_preview, date)
             
             threading.Thread(target=_send_bg, daemon=True).start()
             

@@ -111,13 +111,15 @@ def send_to_role(data_service, role, title, body, data=None):
         conn.close()
 
 
-def notify_teachers_new_comment(data_service, student_id, student_name, sender_name, content):
+def notify_teachers_new_comment(data_service, student_id, student_name, sender_name, content, date=''):
     """Notify all teachers and admins when a parent leaves a comment."""
     title = f'💬 {student_name} 的聯絡簿有新留言'
     body = f'{sender_name}: {content[:100]}'
     data = {
         'type': 'contact_book_comment',
         'studentId': str(student_id),
+        'studentName': str(student_name),
+        'date': str(date),
     }
     
     count = send_to_role(data_service, 'teacher', title, body, data)
