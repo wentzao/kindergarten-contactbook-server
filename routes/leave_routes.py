@@ -1,10 +1,60 @@
 from flask import Blueprint, request, jsonify
 from services.data_service import DataService
+from datetime import datetime, date
 import os
 
 leave_bp = Blueprint('leave', __name__)
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 data_service = DataService(DATA_DIR)
+
+
+@leave_bp.route('/today', methods=['GET'])
+def get_today_leaves():
+    """Get all leave records effective today (across all students)."""
+    today_str = date.today().isoformat()
+    conn = data_service.get_db()
+    try:
+        rows = conn.execute('''
+            SELECT * FROM leave_records
+            WHERE start_date <= ? AND end_date >= ?
+            ORDER BY child_id
+        ''', (today_str, today_str)).fetchall()
+        records = [{
+            'id': r['id'], 'childId': r['child_id'], 'type': r['type'],
+            'startDate': r['start_date'], 'endDate': r['end_date'],
+            'reason': r['reason'], 'createdBy': r['created_by'],
+            'createdAt': r['created_at'],
+        } for r in rows]
+        return jsonify(records)
+    finally:
+        conn.close()
+
+
+@leave_bp.route('/month', methods=['GET'])
+def get_month_leaves():
+    """Get all leave records for a month. Query param: month=YYYY-MM"""
+    month = request.args.get('month', date.today().strftime('%Y-%m'))
+    year, mon = month.split('-')
+    start = f"{year}-{mon}-01"
+    import calendar
+    last_day = calendar.monthrange(int(year), int(mon))[1]
+    end = f"{year}-{mon}-{last_day:02d}"
+    conn = data_service.get_db()
+    try:
+        rows = conn.execute('''
+            SELECT * FROM leave_records
+            WHERE start_date <= ? AND end_date >= ?
+            ORDER BY start_date
+        ''', (end, start)).fetchall()
+        records = [{
+            'id': r['id'], 'childId': r['child_id'], 'type': r['type'],
+            'startDate': r['start_date'], 'endDate': r['end_date'],
+            'reason': r['reason'], 'createdBy': r['created_by'],
+            'createdAt': r['created_at'],
+        } for r in rows]
+        return jsonify(records)
+    finally:
+        conn.close()
 
 @leave_bp.route('/<child_id>', methods=['GET'])
 def get_leave_requests(child_id):
