@@ -23,6 +23,7 @@ CREATE TABLE contact_books (
     redacted TEXT,
     comments TEXT,
     survey_id VARCHAR(50),
+    edited_by TEXT,
     last_modified VARCHAR(50),
     UNIQUE(student_id, date)
 );

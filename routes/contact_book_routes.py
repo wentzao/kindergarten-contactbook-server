@@ -9,6 +9,22 @@ contact_book_bp = Blueprint('contact_book', __name__)
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 data_service = DataService(DATA_DIR)
 
+# Auto-migrate: add edited_by column if missing
+def _auto_migrate():
+    conn = data_service.get_db()
+    try:
+        cols = [row[1] for row in conn.execute('PRAGMA table_info(contact_books)').fetchall()]
+        if 'edited_by' not in cols:
+            conn.execute('ALTER TABLE contact_books ADD COLUMN edited_by TEXT')
+            conn.commit()
+            print('[Migration] Added edited_by column to contact_books')
+    except Exception as e:
+        print(f'[Migration] Error: {e}')
+    finally:
+        conn.close()
+
+_auto_migrate()
+
 # Lazy import to avoid circular imports or missing dependencies
 def _get_notifier():
     try:
@@ -61,7 +77,8 @@ def format_record(r, version='original'):
         },
         'redacted': load_json(r['redacted']),
         'comments': load_json(r['comments']) or [],
-        'surveyId': r['survey_id']
+        'surveyId': r['survey_id'],
+        'editedBy': load_json(r['edited_by']) if r['edited_by'] else None
     }
     
     # Apply versioning overlay (original or redacted)
@@ -140,6 +157,14 @@ def update_teacher_entry(student_id, date):
     # Extract fields that have their own DB columns (not stored inside teacher JSON)
     survey_id = data.pop('surveyId', None) or None
     
+    # Extract editedBy info (teacher identity)
+    edited_by_raw = data.pop('editedBy', None)
+    if edited_by_raw:
+        edited_by_raw['editedAt'] = datetime.now().isoformat()
+        edited_by = json.dumps(edited_by_raw, ensure_ascii=False)
+    else:
+        edited_by = None
+    
     # itemsToBring: frontend sends plain array like ["水壺", "餐具"]
     # DB stores as {"items": [...], "checkedItems": [...], "checkedAt": ...}
     raw_items = data.pop('itemsToBring', None)
@@ -165,16 +190,16 @@ def update_teacher_entry(student_id, date):
         if not row:
             conn.execute('''
                 INSERT INTO contact_books (student_id, date, year, month, status, original_teacher, 
-                    items_to_bring, returned_items, attached_items, survey_id, last_modified)
-                VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?)
+                    items_to_bring, returned_items, attached_items, survey_id, edited_by, last_modified)
+                VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?)
             ''', (student_id, date, year, month, json.dumps(data, ensure_ascii=False),
-                  items_to_bring, returned_items, attached_items, survey_id, datetime.now().isoformat()))
+                  items_to_bring, returned_items, attached_items, survey_id, edited_by, datetime.now().isoformat()))
         else:
             conn.execute('''UPDATE contact_books SET original_teacher = ?, items_to_bring = ?, 
-                returned_items = ?, attached_items = ?, survey_id = ?, status = ?, last_modified = ? 
+                returned_items = ?, attached_items = ?, survey_id = ?, edited_by = ?, status = ?, last_modified = ? 
                 WHERE student_id = ? AND date = ?''',
                 (json.dumps(data, ensure_ascii=False), items_to_bring, returned_items, 
-                 attached_items, survey_id, 'completed', datetime.now().isoformat(), student_id, date))
+                 attached_items, survey_id, edited_by, 'completed', datetime.now().isoformat(), student_id, date))
         conn.commit()
         return jsonify({'status': 'updated'}), 200
     except Exception as e:
@@ -287,6 +312,8 @@ def handle_comments(student_id, date):
             comment = {
                 'senderId': data.get('senderId', 'parent'),
                 'name': data.get('name', '家長'),
+                'cname': data.get('cname', ''),
+                'ename': data.get('ename', ''),
                 'content': data['content'],
                 'createdAt': datetime.now().isoformat()
             }
