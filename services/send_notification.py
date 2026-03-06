@@ -128,31 +128,3 @@ def notify_teachers_new_comment(data_service, student_id, student_name, sender_n
     if count > 0:
         print(f'[FCM] Sent comment notification to {count} devices')
     return count
-
-def notify_teachers_status_update(data_service, student_id, student_name, status, date=''):
-    """Notify all teachers and admins when a contact book status changes (e.g., read, signed)."""
-    # Use a silent data message to update UI without showing an alert to teachers
-    # unless we want to show a toast, but typically real-time UI updates don't need noisy alerts.
-    # However, FCM display notifications require title/body to trigger on system tray if app is backgrounded.
-    # If app is foregrounded, onForegroundMessage catches it.
-    
-    status_label = '已讀' if status == 'read' else '已簽名' if status == 'signed' else status
-    title = f'✅ {student_name} 的聯絡簿{status_label}'
-    body = f'家長已將 {student_name} 的聯絡簿標記為{status_label}'
-    
-    data = {
-        'type': 'contact_book_status',
-        'studentId': str(student_id),
-        'studentName': str(student_name),
-        'status': str(status),
-        'date': str(date),
-        'silent': 'true' # A hint for the frontend to maybe not show a full toast
-    }
-    
-    count = send_to_role(data_service, 'teacher', title, body, data)
-    count += send_to_role(data_service, 'admin', title, body, data)
-    
-    if count > 0:
-        print(f'[FCM] Sent status update notification to {count} devices')
-    return count
-
