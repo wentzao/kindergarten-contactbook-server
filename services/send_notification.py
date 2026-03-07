@@ -54,6 +54,7 @@ def _get_access_token():
 def send_to_tokens(tokens, title, body, data=None):
     """
     Send a push notification to a list of FCM tokens.
+    If title is empty, sends a data-only (silent) message with no visible notification.
     Returns the number of successfully sent messages.
     """
     if not _init() or not tokens:
@@ -70,16 +71,18 @@ def send_to_tokens(tokens, title, body, data=None):
     
     success_count = 0
     for token in tokens:
-        payload = {
-            'message': {
-                'token': token,
-                'notification': {
-                    'title': title,
-                    'body': body,
-                },
-                'data': data or {},
-            }
+        msg_body = {
+            'token': token,
+            'data': data or {},
         }
+        # Only add notification block for visible notifications (title present)
+        if title:
+            msg_body['notification'] = {
+                'title': title,
+                'body': body,
+            }
+        
+        payload = {'message': msg_body}
         
         try:
             resp = requests.post(_FCM_URL, headers=headers, json=payload, timeout=10)
@@ -127,4 +130,28 @@ def notify_teachers_new_comment(data_service, student_id, student_name, sender_n
     
     if count > 0:
         print(f'[FCM] Sent comment notification to {count} devices')
+    return count
+
+
+def notify_teachers_status_update(data_service, student_id, student_name, date, new_status):
+    """Silent data-only push so teacher web can instantly update contact book status.
+    
+    No notification popup is shown — this is a background data channel only.
+    new_status: 'read' | 'signed'
+    """
+    # FCM data-only messages must NOT have a notification block in send_to_tokens
+    # We pass empty title/body and rely on data payload exclusively
+    data = {
+        'type': 'contact_book_status',
+        'studentId': str(student_id),
+        'studentName': str(student_name),
+        'date': str(date),
+        'status': str(new_status),
+    }
+
+    count = send_to_role(data_service, 'teacher', '', '', data)
+    count += send_to_role(data_service, 'admin', '', '', data)
+
+    if count > 0:
+        print(f'[FCM] Sent status update ({new_status}) for {student_name} to {count} devices')
     return count

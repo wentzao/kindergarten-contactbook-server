@@ -34,6 +34,15 @@ def _get_notifier():
         print(f'[Notification] Failed to import sender: {e}')
         return None
 
+
+def _get_status_notifier():
+    try:
+        from services.send_notification import notify_teachers_status_update
+        return notify_teachers_status_update
+    except Exception as e:
+        print(f'[Notification] Failed to import status notifier: {e}')
+        return None
+
 # Helper to deserialize json fields safely
 def load_json(val):
     if not val:
@@ -227,11 +236,23 @@ def mark_as_read(student_id, date):
         if not row:
             return jsonify({'error': 'Record not found'}), 404
         
+        status_changed = False
         if row['status'] in ('pending_parent', 'completed'):
             read_at = data.get('readAt') or datetime.now().isoformat()
             conn.execute('UPDATE contact_books SET status = ?, read_at = ?, last_modified = ? WHERE student_id = ? AND date = ?',
                          ('read', read_at, datetime.now().isoformat(), student_id, date))
             conn.commit()
+            status_changed = True
+        
+        # Notify teachers via silent FCM push (no toast shown)
+        if status_changed:
+            student_name = data.get('studentName', student_id)
+            def _notify_bg():
+                notify = _get_status_notifier()
+                if notify:
+                    notify(data_service, student_id, student_name, date, 'read')
+            threading.Thread(target=_notify_bg, daemon=True).start()
+        
         return jsonify({'status': 'updated'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -263,6 +284,15 @@ def mark_as_signed(student_id, date):
             conn.execute('UPDATE contact_books SET status = ?, signed_at = ?, last_modified = ? WHERE student_id = ? AND date = ?',
                          ('signed', signed_at, datetime.now().isoformat(), student_id, date))
         conn.commit()
+        
+        # Notify teachers via silent FCM push (no toast shown)
+        student_name = data.get('studentName', student_id)
+        def _notify_bg():
+            notify = _get_status_notifier()
+            if notify:
+                notify(data_service, student_id, student_name, date, 'signed')
+        threading.Thread(target=_notify_bg, daemon=True).start()
+        
         return jsonify({'status': 'signed'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
