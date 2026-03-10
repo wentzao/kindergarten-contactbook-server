@@ -338,19 +338,21 @@ def handle_comments(student_id, date):
             data = request.json
             if not data or not data.get('content'):
                 return jsonify({'error': 'Content is required'}), 400
-                
+            
+            now_iso = datetime.now().isoformat()
             comment = {
+                'id': f"{student_id}_{date}_{datetime.now().timestamp():.6f}",  # Stable unique ID
                 'senderId': data.get('senderId', 'parent'),
                 'name': data.get('name', '家長'),
                 'cname': data.get('cname', ''),
                 'ename': data.get('ename', ''),
                 'content': data['content'],
-                'createdAt': datetime.now().isoformat()
+                'createdAt': now_iso
             }
             comments.append(comment)
             
             conn.execute('UPDATE contact_books SET comments = ?, last_modified = ? WHERE student_id = ? AND date = ?',
-                         (json.dumps(comments, ensure_ascii=False), datetime.now().isoformat(), student_id, date))
+                         (json.dumps(comments, ensure_ascii=False), now_iso, student_id, date))
             conn.commit()
             
             # Send push notification to teachers/admins (in background thread)
@@ -371,3 +373,52 @@ def handle_comments(student_id, date):
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
+
+
+@contact_book_bp.route('/<student_id>/<date>/comments/<comment_id>', methods=['DELETE'])
+def delete_comment(student_id, date, comment_id):
+    """
+    Delete a single comment identified by comment_id.
+    Matching order:
+      1. comment['id'] == comment_id         (new comments with server-assigned id)
+      2. comment['content'] == comment_id    (old image comments identified by URL)
+      3. comment['createdAt'] == comment_id  (legacy fallback by timestamp)
+    Returns 200 on success, 404 if the record or comment is not found.
+    """
+    conn = data_service.get_db()
+    try:
+        row = conn.execute(
+            'SELECT comments FROM contact_books WHERE student_id = ? AND date = ?',
+            (student_id, date)
+        ).fetchone()
+        if not row:
+            return jsonify({'error': 'Record not found'}), 404
+
+        comments = load_json(row['comments']) or []
+        original_len = len(comments)
+
+        def _matches(c):
+            return (
+                c.get('id') == comment_id or
+                c.get('content') == comment_id or
+                c.get('createdAt') == comment_id
+            )
+
+        filtered = [c for c in comments if not _matches(c)]
+
+        if len(filtered) == original_len:
+            # Nothing was removed
+            return jsonify({'error': 'Comment not found'}), 404
+
+        conn.execute(
+            'UPDATE contact_books SET comments = ?, last_modified = ? WHERE student_id = ? AND date = ?',
+            (json.dumps(filtered, ensure_ascii=False), datetime.now().isoformat(), student_id, date)
+        )
+        conn.commit()
+        return jsonify({'status': 'deleted', 'remaining': len(filtered)}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
