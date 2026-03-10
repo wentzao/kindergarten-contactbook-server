@@ -116,8 +116,17 @@ def send_to_role(data_service, role, title, body, data=None):
 
 def notify_teachers_new_comment(data_service, student_id, student_name, sender_name, content, date=''):
     """Notify all teachers and admins when a parent leaves a comment."""
+    # If content is a Firebase Storage URL, show a friendly label instead of the raw URL
+    is_image = (
+        isinstance(content, str) and (
+            content.startswith('https://firebasestorage.googleapis.com') or
+            content.startswith('https://storage.googleapis.com')
+        )
+    )
+    content_preview = '傳了一張照片 📷' if is_image else content[:100]
+
     title = f'💬 {student_name} 的聯絡簿有新留言'
-    body = f'{sender_name}: {content[:100]}'
+    body = f'{sender_name}: {content_preview}'
     data = {
         'type': 'contact_book_comment',
         'studentId': str(student_id),
@@ -131,6 +140,7 @@ def notify_teachers_new_comment(data_service, student_id, student_name, sender_n
     if count > 0:
         print(f'[FCM] Sent comment notification to {count} devices')
     return count
+
 
 
 def notify_teachers_status_update(data_service, student_id, student_name, date, new_status):
