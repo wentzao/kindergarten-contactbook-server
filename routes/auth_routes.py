@@ -10,8 +10,15 @@ auth_bp = Blueprint('auth_bp', __name__)
 WEB_WENTZAO_TEACHER_AUTH_API = 'https://web.wentzao.com/api/get_teacher_for_auth'
 
 # LINE Login Channel credentials (for PWA OAuth code exchange)
-LINE_CHANNEL_ID = os.environ.get('LINE_CHANNEL_ID', '1655533540')
-LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET', '3013918a5f553adfedcb20335e42182e')
+# 必須透過環境變數設定，不得有預設值。請在 .env 或伺服器環境中設定：
+#   LINE_CHANNEL_ID=<your_channel_id>
+#   LINE_CHANNEL_SECRET=<your_channel_secret>
+LINE_CHANNEL_ID = os.environ.get('LINE_CHANNEL_ID') or ''
+LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET') or ''
+
+if not LINE_CHANNEL_ID or not LINE_CHANNEL_SECRET:
+    import sys
+    print('[FATAL] LINE_CHANNEL_ID 或 LINE_CHANNEL_SECRET 環境變數未設定，LINE 登入功能將無法運作。', file=sys.stderr)
 
 # ── Pending Logins Store (loginToken → {userData, timestamp}) ──
 # 暫存 PWA 登入結果，5 分鐘過期

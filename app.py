@@ -60,6 +60,12 @@ def index():
 def photo_view():
     return render_template('photo_view.html')
 
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10 MB limit
+
+def _allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 @app.route('/api/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
@@ -67,16 +73,17 @@ def upload_file():
     file = request.files['file']
     if file.filename == '':
         return jsonify({'error': 'No selected file'}), 400
-    
-    if file:
-        filename = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{file.filename}"
-        filepath = os.path.join(UPLOAD_DIR, filename)
-        file.save(filepath)
-        
-        # Return full URL
-        # For local dev, assuming IP access. In prod, use domain.
-        # Here we just return relative path or handle absolute URL construct in frontend/service
-        return jsonify({'url': f"/static/uploads/{filename}"}), 200
+
+    if not _allowed_file(file.filename):
+        return jsonify({'error': f'不允許的檔案類型，僅接受：{", ".join(ALLOWED_EXTENSIONS)}'}), 400
+
+    from werkzeug.utils import secure_filename
+    safe_name = secure_filename(file.filename)
+    filename = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{safe_name}"
+    filepath = os.path.join(UPLOAD_DIR, filename)
+    file.save(filepath)
+
+    return jsonify({'url': f"/static/uploads/{filename}"}), 200
 
 if __name__ == '__main__':
     # Listen on all interfaces
