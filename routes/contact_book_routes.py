@@ -229,17 +229,9 @@ def update_teacher_entry(student_id, date):
                  attached_items, survey_id, edited_by, 'completed', datetime.now().isoformat(), student_id, date))
         conn.commit()
 
-        # Notify parents that teacher has updated the contact book
-        student_name = ''
-        if edited_by_raw:
-            # Try to get student name from editedBy context (not always available)
-            student_name = request.json.get('studentName', '')
-
-        def _notify_parent_bg():
-            notify = _get_parent_record_notifier()
-            if notify:
-                notify(data_service, student_id, student_name or student_id, date)
-        threading.Thread(target=_notify_parent_bg, daemon=True).start()
+        # NOTE: Do NOT auto-notify parents here.
+        # Teachers use POST /api/notifications/send-contact-book to manually
+        # trigger notifications after finishing all students, or schedule a time.
 
         return jsonify({'status': 'updated'}), 200
     except Exception as e:

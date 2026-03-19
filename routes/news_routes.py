@@ -3,6 +3,7 @@ from datetime import datetime
 from services.data_service import DataService
 import os
 import json
+import threading
 
 news_bp = Blueprint('news', __name__)
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
@@ -156,7 +157,16 @@ def create_news():
         
         # Return new item
         r = conn.execute('SELECT * FROM news WHERE id = ?', (news_id,)).fetchone()
-        return jsonify(format_news(r)), 201
+        result = format_news(r)
+
+        # Notify parents if published immediately (no future publishAt)
+        if data.get('status', 'published') == 'published':
+            pub_at = data.get('publishAt')
+            is_future = pub_at and pub_at > now.isoformat() if pub_at else False
+            if not is_future:
+                _notify_announcement_bg(news_id, data.get('title', ''))
+
+        return jsonify(result), 201
     finally:
         conn.close()
 
@@ -180,6 +190,8 @@ def update_news(news_id):
             if field in data:
                 news[field] = data[field]
         
+        old_status = r['status']
+
         conn.execute('''
             UPDATE news SET title=?, tag=?, cover_image=?, content_blocks=?, author=?,
             is_pinned=?, publish_at=?, survey_id=?, target_classes=?, status=?, updated_at=?
@@ -191,7 +203,11 @@ def update_news(news_id):
             news_id
         ))
         conn.commit()
-        
+
+        # Notify parents if status just changed to 'published'
+        if old_status != 'published' and news['status'] == 'published':
+            _notify_announcement_bg(news_id, news['title'])
+
         r2 = conn.execute('SELECT * FROM news WHERE id = ?', (news_id,)).fetchone()
         return jsonify(format_news(r2))
     finally:
@@ -208,3 +224,14 @@ def delete_news(news_id):
         return jsonify({'status': 'deleted'}), 200
     finally:
         conn.close()
+
+
+def _notify_announcement_bg(news_id, title_text):
+    """Send announcement notification to all parents in a background thread."""
+    def _send():
+        try:
+            from services.send_notification import notify_parents_announcement
+            notify_parents_announcement(data_service, news_id, title_text, '')
+        except Exception as e:
+            print(f'[Notification] Error sending announcement notification: {e}')
+    threading.Thread(target=_send, daemon=True).start()

@@ -114,21 +114,61 @@ def send_to_role(data_service, role, title, body, data=None):
         conn.close()
 
 
-def send_to_student_parents(data_service, student_id, title, body, data=None):
-    """Send notification to all parent devices that are linked to a specific student."""
+def _get_blocked_user_ids(data_service, pref_column):
+    """Get user_ids that have a specific notification preference disabled."""
     conn = data_service.get_db()
     try:
         rows = conn.execute(
-            "SELECT DISTINCT push_token, student_ids FROM push_tokens WHERE role = 'parent' AND student_ids IS NOT NULL",
+            f'SELECT user_id FROM notification_preferences WHERE {pref_column} = 0'
+        ).fetchall()
+        return {r['user_id'] for r in rows}
+    finally:
+        conn.close()
+
+
+def send_to_student_parents(data_service, student_id, title, body, data=None, pref_column=None):
+    """Send notification to all parent devices linked to a specific student.
+
+    pref_column: if set, filters out users who disabled this preference
+                 (e.g. 'contact_book_notify', 'announcement_notify')
+    """
+    blocked = _get_blocked_user_ids(data_service, pref_column) if pref_column else set()
+
+    conn = data_service.get_db()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT user_id, push_token, student_ids FROM push_tokens WHERE role = 'parent' AND student_ids IS NOT NULL",
         ).fetchall()
         tokens = []
         for r in rows:
+            if r['user_id'] in blocked:
+                continue
             try:
                 sids = json.loads(r['student_ids']) if r['student_ids'] else []
                 if student_id in sids:
                     tokens.append(r['push_token'])
             except (json.JSONDecodeError, TypeError):
                 continue
+        if tokens:
+            return send_to_tokens(tokens, title, body, data)
+        return 0
+    finally:
+        conn.close()
+
+
+def send_to_all_parents(data_service, title, body, data=None, pref_column=None):
+    """Send notification to ALL parent devices (for broadcasts like announcements).
+
+    pref_column: if set, filters out users who disabled this preference.
+    """
+    blocked = _get_blocked_user_ids(data_service, pref_column) if pref_column else set()
+
+    conn = data_service.get_db()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT user_id, push_token FROM push_tokens WHERE role = 'parent'"
+        ).fetchall()
+        tokens = [r['push_token'] for r in rows if r['user_id'] not in blocked]
         if tokens:
             return send_to_tokens(tokens, title, body, data)
         return 0
@@ -175,7 +215,10 @@ def notify_parents_new_record(data_service, student_id, student_name, date):
         'studentName': str(student_name),
         'date': str(date),
     }
-    count = send_to_student_parents(data_service, str(student_id), title, body, data)
+    count = send_to_student_parents(
+        data_service, str(student_id), title, body, data,
+        pref_column='contact_book_notify'
+    )
     if count > 0:
         print(f'[FCM] Sent new record notification to {count} parent devices for {student_name}')
     return count
@@ -199,9 +242,29 @@ def notify_parents_new_comment(data_service, student_id, student_name, sender_na
         'studentName': str(student_name),
         'date': str(date),
     }
-    count = send_to_student_parents(data_service, str(student_id), title, body, data)
+    count = send_to_student_parents(
+        data_service, str(student_id), title, body, data,
+        pref_column='contact_book_notify'
+    )
     if count > 0:
         print(f'[FCM] Sent teacher comment notification to {count} parent devices for {student_name}')
+    return count
+
+
+def notify_parents_announcement(data_service, news_id, title_text, body_text):
+    """Notify all parents when a new school announcement is published."""
+    title = f'📢 {title_text}'
+    body = body_text[:100] if body_text else '校園有新公告，請查看'
+    data = {
+        'type': 'announcement',
+        'id': str(news_id),
+    }
+    count = send_to_all_parents(
+        data_service, title, body, data,
+        pref_column='announcement_notify'
+    )
+    if count > 0:
+        print(f'[FCM] Sent announcement notification to {count} parent devices')
     return count
 
 
