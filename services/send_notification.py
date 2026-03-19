@@ -114,6 +114,28 @@ def send_to_role(data_service, role, title, body, data=None):
         conn.close()
 
 
+def send_to_student_parents(data_service, student_id, title, body, data=None):
+    """Send notification to all parent devices that are linked to a specific student."""
+    conn = data_service.get_db()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT push_token, student_ids FROM push_tokens WHERE role = 'parent' AND student_ids IS NOT NULL",
+        ).fetchall()
+        tokens = []
+        for r in rows:
+            try:
+                sids = json.loads(r['student_ids']) if r['student_ids'] else []
+                if student_id in sids:
+                    tokens.append(r['push_token'])
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if tokens:
+            return send_to_tokens(tokens, title, body, data)
+        return 0
+    finally:
+        conn.close()
+
+
 def notify_teachers_new_comment(data_service, student_id, student_name, sender_name, content, date=''):
     """Notify all teachers and admins when a parent leaves a comment."""
     # If content is a Firebase Storage URL, show a friendly label instead of the raw URL
@@ -141,6 +163,46 @@ def notify_teachers_new_comment(data_service, student_id, student_name, sender_n
         print(f'[FCM] Sent comment notification to {count} devices')
     return count
 
+
+
+def notify_parents_new_record(data_service, student_id, student_name, date):
+    """Notify parents when a teacher creates/updates a contact book entry."""
+    title = f'📖 {student_name} 的聯絡簿已更新'
+    body = f'{date} 的聯絡簿已由老師填寫，請查看'
+    data = {
+        'type': 'contact_book_update',
+        'studentId': str(student_id),
+        'studentName': str(student_name),
+        'date': str(date),
+    }
+    count = send_to_student_parents(data_service, str(student_id), title, body, data)
+    if count > 0:
+        print(f'[FCM] Sent new record notification to {count} parent devices for {student_name}')
+    return count
+
+
+def notify_parents_new_comment(data_service, student_id, student_name, sender_name, content, date=''):
+    """Notify parents when a teacher leaves a comment."""
+    is_image = (
+        isinstance(content, str) and (
+            content.startswith('https://firebasestorage.googleapis.com') or
+            content.startswith('https://storage.googleapis.com')
+        )
+    )
+    content_preview = '傳了一張照片 📷' if is_image else content[:100]
+
+    title = f'💬 {student_name} 的聯絡簿有新留言'
+    body = f'{sender_name}: {content_preview}'
+    data = {
+        'type': 'contact_book_comment',
+        'studentId': str(student_id),
+        'studentName': str(student_name),
+        'date': str(date),
+    }
+    count = send_to_student_parents(data_service, str(student_id), title, body, data)
+    if count > 0:
+        print(f'[FCM] Sent teacher comment notification to {count} parent devices for {student_name}')
+    return count
 
 
 def notify_teachers_status_update(data_service, student_id, student_name, date, new_status):

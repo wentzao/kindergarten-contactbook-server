@@ -43,6 +43,24 @@ def _get_status_notifier():
         print(f'[Notification] Failed to import status notifier: {e}')
         return None
 
+
+def _get_parent_record_notifier():
+    try:
+        from services.send_notification import notify_parents_new_record
+        return notify_parents_new_record
+    except Exception as e:
+        print(f'[Notification] Failed to import parent record notifier: {e}')
+        return None
+
+
+def _get_parent_comment_notifier():
+    try:
+        from services.send_notification import notify_parents_new_comment
+        return notify_parents_new_comment
+    except Exception as e:
+        print(f'[Notification] Failed to import parent comment notifier: {e}')
+        return None
+
 # Helper to deserialize json fields safely
 def load_json(val):
     if not val:
@@ -204,12 +222,25 @@ def update_teacher_entry(student_id, date):
             ''', (student_id, date, year, month, json.dumps(data, ensure_ascii=False),
                   items_to_bring, returned_items, attached_items, survey_id, edited_by, datetime.now().isoformat()))
         else:
-            conn.execute('''UPDATE contact_books SET original_teacher = ?, items_to_bring = ?, 
-                returned_items = ?, attached_items = ?, survey_id = ?, edited_by = ?, status = ?, last_modified = ? 
+            conn.execute('''UPDATE contact_books SET original_teacher = ?, items_to_bring = ?,
+                returned_items = ?, attached_items = ?, survey_id = ?, edited_by = ?, status = ?, last_modified = ?
                 WHERE student_id = ? AND date = ?''',
-                (json.dumps(data, ensure_ascii=False), items_to_bring, returned_items, 
+                (json.dumps(data, ensure_ascii=False), items_to_bring, returned_items,
                  attached_items, survey_id, edited_by, 'completed', datetime.now().isoformat(), student_id, date))
         conn.commit()
+
+        # Notify parents that teacher has updated the contact book
+        student_name = ''
+        if edited_by_raw:
+            # Try to get student name from editedBy context (not always available)
+            student_name = request.json.get('studentName', '')
+
+        def _notify_parent_bg():
+            notify = _get_parent_record_notifier()
+            if notify:
+                notify(data_service, student_id, student_name or student_id, date)
+        threading.Thread(target=_notify_parent_bg, daemon=True).start()
+
         return jsonify({'status': 'updated'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -355,16 +386,24 @@ def handle_comments(student_id, date):
                          (json.dumps(comments, ensure_ascii=False), now_iso, student_id, date))
             conn.commit()
             
-            # Send push notification to teachers/admins (in background thread)
+            # Send push notification based on sender role
             sender_name = comment['name']
             content_preview = comment['content']
             student_name = data.get('studentName', student_id)
-            
+            sender_role = data.get('senderRole', 'parent')
+
             def _send_bg():
-                notify = _get_notifier()
-                if notify:
-                    notify(data_service, student_id, student_name, sender_name, content_preview, date)
-            
+                if sender_role in ('teacher', 'admin'):
+                    # Teacher posted a comment → notify parents of this student
+                    notify = _get_parent_comment_notifier()
+                    if notify:
+                        notify(data_service, student_id, student_name, sender_name, content_preview, date)
+                else:
+                    # Parent posted a comment → notify teachers/admins
+                    notify = _get_notifier()
+                    if notify:
+                        notify(data_service, student_id, student_name, sender_name, content_preview, date)
+
             threading.Thread(target=_send_bg, daemon=True).start()
             
             return jsonify(comment), 201

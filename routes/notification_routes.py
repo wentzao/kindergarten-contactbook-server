@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 from services.data_service import DataService
+import json
 import os
 
 notification_bp = Blueprint('notifications', __name__)
@@ -44,6 +45,12 @@ def ensure_tables():
             conn.commit()
         except Exception:
             pass  # Column already exists
+        # Migration: add student_ids column if it doesn't exist
+        try:
+            conn.execute('ALTER TABLE push_tokens ADD COLUMN student_ids TEXT')
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
         conn.commit()
     finally:
         conn.close()
@@ -72,6 +79,7 @@ def register_push_token():
 
     device_name = data.get('deviceName', 'Unknown')
     role = data.get('role', 'parent')
+    student_ids = json.dumps(data.get('studentIds', []), ensure_ascii=False) if data.get('studentIds') else None
     now = datetime.now().isoformat()
 
     conn = data_service.get_db()
@@ -80,19 +88,20 @@ def register_push_token():
             # Teachers/admins: only keep the LATEST token (1 device per user per role)
             conn.execute('DELETE FROM push_tokens WHERE user_id = ? AND role = ?', (user_id, role))
             conn.execute('''
-                INSERT INTO push_tokens (user_id, push_token, device_name, role, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (user_id, push_token, device_name, role, now, now))
+                INSERT INTO push_tokens (user_id, push_token, device_name, role, student_ids, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (user_id, push_token, device_name, role, student_ids, now, now))
         else:
             # Parents: allow multiple devices (UPSERT by user_id + push_token)
             conn.execute('''
-                INSERT INTO push_tokens (user_id, push_token, device_name, role, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO push_tokens (user_id, push_token, device_name, role, student_ids, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id, push_token) DO UPDATE SET
                     device_name = excluded.device_name,
                     role = excluded.role,
+                    student_ids = excluded.student_ids,
                     updated_at = excluded.updated_at
-            ''', (user_id, push_token, device_name, role, now, now))
+            ''', (user_id, push_token, device_name, role, student_ids, now, now))
         conn.commit()
         return jsonify({'status': 'ok', 'message': 'Push token registered'}), 200
     except Exception as e:
