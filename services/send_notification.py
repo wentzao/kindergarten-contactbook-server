@@ -59,22 +59,30 @@ def send_to_tokens(tokens, title, body, data=None):
     Returns the number of successfully sent messages.
     """
     if not tokens:
+        print('[Notification] No tokens to send to')
         return 0
 
     # Split tokens by type
     expo_tokens = [t for t in tokens if t.startswith('ExponentPushToken[')]
     fcm_tokens = [t for t in tokens if not t.startswith('ExponentPushToken[')]
 
+    print(f'[Notification] Sending to {len(expo_tokens)} Expo tokens, {len(fcm_tokens)} FCM tokens')
+    print(f'[Notification] Title: {title}, Body: {body[:50] if body else "(empty)"}')
+
     count = 0
     if expo_tokens:
         count += _send_expo_push(expo_tokens, title, body, data)
     if fcm_tokens:
         count += _send_fcm(fcm_tokens, title, body, data)
+
+    print(f'[Notification] Total sent: {count}/{len(tokens)}')
     return count
 
 
 def _send_expo_push(tokens, title, body, data=None):
     """Send notifications via Expo Push Service."""
+    import threading
+
     messages = []
     for token in tokens:
         msg = {
@@ -89,6 +97,7 @@ def _send_expo_push(tokens, title, body, data=None):
 
     # Expo allows up to 100 messages per request
     success_count = 0
+    ticket_ids = []
     for i in range(0, len(messages), 100):
         batch = messages[i:i+100]
         try:
@@ -98,12 +107,16 @@ def _send_expo_push(tokens, title, body, data=None):
                 json=batch,
                 timeout=15,
             )
+            print(f'[ExpoPush] Response: {resp.status_code} {resp.text[:500]}')
             if resp.status_code == 200:
                 result = resp.json()
                 tickets = result.get('data', [])
                 for ticket in tickets:
                     if ticket.get('status') == 'ok':
                         success_count += 1
+                        tid = ticket.get('id')
+                        if tid:
+                            ticket_ids.append(tid)
                     else:
                         detail = ticket.get('details', {})
                         err = detail.get('error', ticket.get('message', 'unknown'))
@@ -114,7 +127,25 @@ def _send_expo_push(tokens, title, body, data=None):
             print(f'[ExpoPush] Request error: {e}')
 
     if success_count > 0:
-        print(f'[ExpoPush] Sent {success_count}/{len(tokens)} messages')
+        print(f'[ExpoPush] Sent {success_count}/{len(tokens)} messages, ticket_ids={ticket_ids}')
+
+    # Check receipts after 15 seconds in background
+    if ticket_ids:
+        def _check_receipts():
+            import time
+            time.sleep(15)
+            try:
+                resp = requests.post(
+                    'https://exp.host/--/api/v2/push/getReceipts',
+                    headers={'Content-Type': 'application/json'},
+                    json={'ids': ticket_ids},
+                    timeout=15,
+                )
+                print(f'[ExpoPush] Receipts: {resp.text[:500]}')
+            except Exception as e:
+                print(f'[ExpoPush] Receipt check error: {e}')
+        threading.Thread(target=_check_receipts, daemon=True).start()
+
     return success_count
 
 
@@ -183,11 +214,13 @@ def send_to_student_parents(data_service, student_id, title, body, data=None, pr
     If pref_column is provided (e.g. 'contact_book_notify'), users who have opted out
     of that notification type will be excluded.
     """
+    print(f'[Notification] send_to_student_parents called for student_id={student_id}, pref_column={pref_column}')
     conn = data_service.get_db()
     try:
         rows = conn.execute(
             "SELECT DISTINCT push_token, user_id, student_ids FROM push_tokens WHERE role = 'parent' AND student_ids IS NOT NULL",
         ).fetchall()
+        print(f'[Notification] Found {len(rows)} parent token rows in DB')
 
         # Build set of opted-out user_ids
         opted_out = set()
@@ -196,17 +229,21 @@ def send_to_student_parents(data_service, student_id, title, body, data=None, pr
                 f"SELECT user_id FROM notification_preferences WHERE {pref_column} = 0"
             ).fetchall()
             opted_out = {r['user_id'] for r in pref_rows}
+            print(f'[Notification] Opted-out users: {len(opted_out)}')
 
         tokens = []
         for r in rows:
             try:
                 sids = json.loads(r['student_ids']) if r['student_ids'] else []
+                print(f'[Notification] Token user_id={r["user_id"]}, student_ids={sids}, target={student_id}, match={student_id in sids}')
                 if student_id in sids:
                     if pref_column and r['user_id'] in opted_out:
+                        print(f'[Notification] Skipping user {r["user_id"]} (opted out)')
                         continue
                     tokens.append(r['push_token'])
             except (json.JSONDecodeError, TypeError):
                 continue
+        print(f'[Notification] Final tokens to send: {len(tokens)}')
         if tokens:
             return send_to_tokens(tokens, title, body, data)
         return 0
