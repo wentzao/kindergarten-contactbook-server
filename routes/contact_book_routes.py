@@ -269,7 +269,7 @@ def mark_as_read(student_id, date):
         
         # Notify teachers via silent FCM push (no toast shown)
         if status_changed:
-            student_name = data.get('studentName', student_id)
+            student_name = data.get('studentName') or student_id
             def _notify_bg():
                 notify = _get_status_notifier()
                 if notify:
@@ -381,7 +381,7 @@ def handle_comments(student_id, date):
             # Send push notification based on sender role
             sender_name = comment['name']
             content_preview = comment['content']
-            student_name = data.get('studentName', student_id)
+            student_name = data.get('studentName') or student_id
             sender_role = data.get('senderRole', 'parent')
 
             def _send_bg():

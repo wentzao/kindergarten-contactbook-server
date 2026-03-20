@@ -5,9 +5,31 @@ Only requires: requests, google-auth
 """
 import os
 import json
+import sqlite3
 import requests
 from google.oauth2 import service_account
 from google.auth.transport.requests import Request as GoogleAuthRequest
+
+_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'kindergarten.db')
+
+
+def lookup_student_name(student_id):
+    """Look up cached student name (Chinese + English) by student_id.
+    Returns the student_id itself if no name is found."""
+    try:
+        conn = sqlite3.connect(_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            'SELECT chinese_name, english_name FROM student_names WHERE student_id = ?',
+            (student_id,)
+        ).fetchone()
+        conn.close()
+        if row:
+            name = f"{row['chinese_name'] or ''} {row['english_name'] or ''}".strip()
+            return name if name else student_id
+    except Exception:
+        pass
+    return student_id
 
 # FCM HTTP v1 API endpoint
 _PROJECT_ID = None
@@ -282,6 +304,9 @@ def notify_teachers_new_comment(data_service, student_id, student_name, sender_n
 
 def notify_parents_new_record(data_service, student_id, student_name, date):
     """Notify parents when a teacher creates/updates a contact book entry."""
+    # Resolve student name from cache if it looks like an ID
+    if not student_name or student_name == student_id:
+        student_name = lookup_student_name(student_id)
     title = f'📖 {student_name} 的聯絡簿已更新'
     body = f'{date} 的聯絡簿已由老師填寫，請查看'
     data = {
@@ -299,6 +324,9 @@ def notify_parents_new_record(data_service, student_id, student_name, date):
 
 def notify_parents_new_comment(data_service, student_id, student_name, sender_name, content, date=''):
     """Notify parents when a teacher leaves a comment."""
+    # Resolve student name from cache if it looks like an ID
+    if not student_name or student_name == student_id:
+        student_name = lookup_student_name(student_id)
     is_image = (
         isinstance(content, str) and (
             content.startswith('https://firebasestorage.googleapis.com') or
@@ -308,7 +336,7 @@ def notify_parents_new_comment(data_service, student_id, student_name, sender_na
     content_preview = '傳了一張照片 📷' if is_image else content[:100]
 
     title = f'💬 {student_name} 的聯絡簿有新留言'
-    body = f'{sender_name}: {content_preview}'
+    body = content_preview
     data = {
         'type': 'contact_book_comment',
         'studentId': str(student_id),

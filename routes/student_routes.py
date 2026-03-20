@@ -1,8 +1,32 @@
 from flask import Blueprint, request, jsonify
 import requests
+import sqlite3
+import os
 from datetime import datetime
 
 student_bp = Blueprint('student_bp', __name__)
+
+# Student name cache DB path
+_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'kindergarten.db')
+
+def _cache_student_names(students):
+    """Cache student names in the database for notification lookups."""
+    try:
+        conn = sqlite3.connect(_DB_PATH)
+        conn.execute('''CREATE TABLE IF NOT EXISTS student_names (
+            student_id VARCHAR(50) PRIMARY KEY,
+            chinese_name VARCHAR(100),
+            english_name VARCHAR(100)
+        )''')
+        for s in students:
+            conn.execute(
+                'INSERT OR REPLACE INTO student_names (student_id, chinese_name, english_name) VALUES (?, ?, ?)',
+                (s['studentId'], s.get('chineseName', ''), s.get('englishName', ''))
+            )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f'[StudentNames] Cache error: {e}')
 
 def get_current_semester():
     now = datetime.now()
@@ -98,6 +122,10 @@ def get_classes():
                 if class_name not in filtered_classes:
                     filtered_classes.append(class_name)
         
+        # Cache student names for notification lookups
+        if filtered_students:
+            _cache_student_names(filtered_students)
+
         return jsonify({
             'semester': semester,
             'classes': filtered_classes,
