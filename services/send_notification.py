@@ -53,22 +53,85 @@ def _get_access_token():
 
 def send_to_tokens(tokens, title, body, data=None):
     """
-    Send a push notification to a list of FCM tokens.
+    Send a push notification to a list of tokens.
+    Automatically detects Expo Push Tokens vs FCM tokens and uses the appropriate API.
     If title is empty, sends a data-only (silent) message with no visible notification.
     Returns the number of successfully sent messages.
     """
-    if not _init() or not tokens:
+    if not tokens:
         return 0
-    
+
+    # Split tokens by type
+    expo_tokens = [t for t in tokens if t.startswith('ExponentPushToken[')]
+    fcm_tokens = [t for t in tokens if not t.startswith('ExponentPushToken[')]
+
+    count = 0
+    if expo_tokens:
+        count += _send_expo_push(expo_tokens, title, body, data)
+    if fcm_tokens:
+        count += _send_fcm(fcm_tokens, title, body, data)
+    return count
+
+
+def _send_expo_push(tokens, title, body, data=None):
+    """Send notifications via Expo Push Service."""
+    messages = []
+    for token in tokens:
+        msg = {
+            'to': token,
+            'data': data or {},
+        }
+        if title:
+            msg['title'] = title
+            msg['body'] = body
+            msg['sound'] = 'default'
+        messages.append(msg)
+
+    # Expo allows up to 100 messages per request
+    success_count = 0
+    for i in range(0, len(messages), 100):
+        batch = messages[i:i+100]
+        try:
+            resp = requests.post(
+                'https://exp.host/--/api/v2/push/send',
+                headers={'Content-Type': 'application/json'},
+                json=batch,
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                result = resp.json()
+                tickets = result.get('data', [])
+                for ticket in tickets:
+                    if ticket.get('status') == 'ok':
+                        success_count += 1
+                    else:
+                        detail = ticket.get('details', {})
+                        err = detail.get('error', ticket.get('message', 'unknown'))
+                        print(f'[ExpoPush] Ticket error: {err}')
+            else:
+                print(f'[ExpoPush] Send failed ({resp.status_code}): {resp.text[:200]}')
+        except Exception as e:
+            print(f'[ExpoPush] Request error: {e}')
+
+    if success_count > 0:
+        print(f'[ExpoPush] Sent {success_count}/{len(tokens)} messages')
+    return success_count
+
+
+def _send_fcm(tokens, title, body, data=None):
+    """Send notifications via FCM HTTP v1 API."""
+    if not _init():
+        return 0
+
     access_token = _get_access_token()
     if not access_token:
         return 0
-    
+
     headers = {
         'Authorization': f'Bearer {access_token}',
         'Content-Type': 'application/json',
     }
-    
+
     success_count = 0
     for token in tokens:
         msg_body = {
@@ -81,9 +144,9 @@ def send_to_tokens(tokens, title, body, data=None):
                 'title': title,
                 'body': body,
             }
-        
+
         payload = {'message': msg_body}
-        
+
         try:
             resp = requests.post(_FCM_URL, headers=headers, json=payload, timeout=10)
             if resp.status_code == 200:
@@ -94,7 +157,7 @@ def send_to_tokens(tokens, title, body, data=None):
                 print(f'[FCM] Send failed ({resp.status_code}): {resp.text[:200]}')
         except Exception as e:
             print(f'[FCM] Request error: {e}')
-    
+
     return success_count
 
 
