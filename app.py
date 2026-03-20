@@ -30,7 +30,7 @@ from routes.contact_book_routes import contact_book_bp
 from routes.news_routes import news_bp
 from routes.auth_routes import auth_bp
 from routes.student_routes import student_bp
-from routes.notification_routes import notification_bp
+from routes.notification_routes import notification_bp, init_scheduler
 
 app.register_blueprint(leave_bp, url_prefix='/api/leave')
 app.register_blueprint(med_bp, url_prefix='/api/meds')
@@ -84,6 +84,18 @@ def upload_file():
     file.save(filepath)
 
     return jsonify({'url': f"/static/uploads/{filename}"}), 200
+
+# Initialize APScheduler for scheduled notifications
+from apscheduler.schedulers.background import BackgroundScheduler
+import atexit
+
+scheduler = BackgroundScheduler(timezone='Asia/Taipei')
+scheduler.start()
+atexit.register(lambda: scheduler.shutdown(wait=False))
+
+# Load saved notification schedules and register cron jobs
+init_scheduler(scheduler)
+
 
 if __name__ == '__main__':
     # Listen on all interfaces

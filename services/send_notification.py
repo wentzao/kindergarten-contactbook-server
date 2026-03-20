@@ -114,18 +114,33 @@ def send_to_role(data_service, role, title, body, data=None):
         conn.close()
 
 
-def send_to_student_parents(data_service, student_id, title, body, data=None):
-    """Send notification to all parent devices that are linked to a specific student."""
+def send_to_student_parents(data_service, student_id, title, body, data=None, pref_column=None):
+    """Send notification to all parent devices that are linked to a specific student.
+
+    If pref_column is provided (e.g. 'contact_book_notify'), users who have opted out
+    of that notification type will be excluded.
+    """
     conn = data_service.get_db()
     try:
         rows = conn.execute(
-            "SELECT DISTINCT push_token, student_ids FROM push_tokens WHERE role = 'parent' AND student_ids IS NOT NULL",
+            "SELECT DISTINCT push_token, user_id, student_ids FROM push_tokens WHERE role = 'parent' AND student_ids IS NOT NULL",
         ).fetchall()
+
+        # Build set of opted-out user_ids
+        opted_out = set()
+        if pref_column:
+            pref_rows = conn.execute(
+                f"SELECT user_id FROM notification_preferences WHERE {pref_column} = 0"
+            ).fetchall()
+            opted_out = {r['user_id'] for r in pref_rows}
+
         tokens = []
         for r in rows:
             try:
                 sids = json.loads(r['student_ids']) if r['student_ids'] else []
                 if student_id in sids:
+                    if pref_column and r['user_id'] in opted_out:
+                        continue
                     tokens.append(r['push_token'])
             except (json.JSONDecodeError, TypeError):
                 continue
@@ -175,7 +190,8 @@ def notify_parents_new_record(data_service, student_id, student_name, date):
         'studentName': str(student_name),
         'date': str(date),
     }
-    count = send_to_student_parents(data_service, str(student_id), title, body, data)
+    count = send_to_student_parents(data_service, str(student_id), title, body, data,
+                                     pref_column='contact_book_notify')
     if count > 0:
         print(f'[FCM] Sent new record notification to {count} parent devices for {student_name}')
     return count
@@ -199,10 +215,44 @@ def notify_parents_new_comment(data_service, student_id, student_name, sender_na
         'studentName': str(student_name),
         'date': str(date),
     }
-    count = send_to_student_parents(data_service, str(student_id), title, body, data)
+    count = send_to_student_parents(data_service, str(student_id), title, body, data,
+                                     pref_column='contact_book_notify')
     if count > 0:
         print(f'[FCM] Sent teacher comment notification to {count} parent devices for {student_name}')
     return count
+
+
+def notify_parents_announcement(data_service, news_id, title_text, body_text=''):
+    """Notify all parents about a new announcement, respecting announcement_notify preference."""
+    title = f'📢 {title_text}'
+    body = body_text or '學校有新公告，請前往查看'
+    ndata = {
+        'type': 'announcement',
+        'id': str(news_id),
+    }
+
+    conn = data_service.get_db()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT push_token, user_id FROM push_tokens WHERE role = 'parent'"
+        ).fetchall()
+
+        # Exclude users who opted out of announcement notifications
+        pref_rows = conn.execute(
+            "SELECT user_id FROM notification_preferences WHERE announcement_notify = 0"
+        ).fetchall()
+        opted_out = {r['user_id'] for r in pref_rows}
+
+        tokens = [r['push_token'] for r in rows if r['user_id'] not in opted_out]
+
+        if tokens:
+            count = send_to_tokens(tokens, title, body, ndata)
+            if count > 0:
+                print(f'[FCM] Sent announcement notification to {count} parent devices')
+            return count
+        return 0
+    finally:
+        conn.close()
 
 
 def notify_teachers_status_update(data_service, student_id, student_name, date, new_status):
