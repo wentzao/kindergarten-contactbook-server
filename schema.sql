@@ -113,3 +113,17 @@ CREATE TABLE notification_preferences (
     announcement_notify BOOLEAN DEFAULT 1,
     updated_at VARCHAR(50)
 );
+
+DROP TABLE IF EXISTS class_journals;
+CREATE TABLE class_journals (
+    id VARCHAR(50) PRIMARY KEY,
+    class_name VARCHAR(100) NOT NULL,
+    date VARCHAR(20) NOT NULL,
+    content_blocks TEXT DEFAULT '[]',
+    student_notes TEXT DEFAULT '{}',
+    edited_by TEXT,
+    created_at VARCHAR(50),
+    updated_at VARCHAR(50),
+    UNIQUE(class_name, date)
+);
+CREATE INDEX idx_cj_class_date ON class_journals(class_name, date);
