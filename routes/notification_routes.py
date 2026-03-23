@@ -86,6 +86,12 @@ def ensure_tables():
         except Exception:
             pass
         conn.commit()
+
+        # Enable WAL mode once at startup (safe here — no concurrent connections yet)
+        try:
+            conn.execute('PRAGMA journal_mode=WAL')
+        except Exception:
+            pass
     finally:
         conn.close()
 
@@ -389,8 +395,9 @@ def get_pending_notifications():
     if not student_ids:
         return jsonify({'count': 0, 'entries': [], 'notifiedCount': 0}), 200
 
-    conn = data_service.get_db()
+    conn = None
     try:
+        conn = data_service.get_db()
         # Check if notified_at column exists
         cols = [r[1] for r in conn.execute('PRAGMA table_info(contact_books)').fetchall()]
         has_notified = 'notified_at' in cols
@@ -445,7 +452,8 @@ def get_pending_notifications():
         print(f'[Pending] ERROR for studentIds={student_ids[:3]}... date={date_filter}: {e}\n{traceback.format_exc()}')
         return jsonify({'error': str(e)}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 @notification_bp.route('/send-batch', methods=['POST'])
