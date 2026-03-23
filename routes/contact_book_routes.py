@@ -538,6 +538,20 @@ def batch_save_teacher(class_name, date):
         conn.close()
 
 
+@contact_book_bp.route('/admin/clear-date/<date>', methods=['DELETE'])
+def admin_clear_date(date):
+    """Admin: delete all contact_books and class_journals for a given date."""
+    conn = data_service.get_db()
+    try:
+        cb = conn.execute('DELETE FROM contact_books WHERE date = ?', (date,)).rowcount
+        cj = conn.execute('DELETE FROM class_journals WHERE date = ?', (date,)).rowcount
+        conn.commit()
+        return jsonify({'deleted': {'contactBooks': cb, 'classJournals': cj}}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
 @contact_book_bp.route('/class/<class_name>/<date>/teacher', methods=['GET'])
 def get_class_date_teacher(class_name, date):
     """Get all students' contact_book records for a class+date (journal editor load).

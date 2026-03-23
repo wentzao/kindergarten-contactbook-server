@@ -357,20 +357,38 @@ def get_pending_notifications():
     conn = data_service.get_db()
     try:
         placeholders = ','.join('?' for _ in student_ids)
+
+        # Pending (un-notified, either completed or pending_teacher)
         query = f'''
             SELECT student_id, date, status FROM contact_books
             WHERE student_id IN ({placeholders})
-            AND status = 'completed'
+            AND status IN ('completed', 'pending_teacher')
             AND notified_at IS NULL
         '''
         params = list(student_ids)
         if date_filter:
             query += ' AND date = ?'
             params.append(date_filter)
-
         rows = conn.execute(query, params).fetchall()
         entries = [{'studentId': r['student_id'], 'date': r['date'], 'status': r['status']} for r in rows]
-        return jsonify({'count': len(entries), 'entries': entries}), 200
+
+        # Also count already-notified records (to distinguish "未編輯" from "已通知")
+        notified_query = f'''
+            SELECT COUNT(*) as cnt FROM contact_books
+            WHERE student_id IN ({placeholders})
+            AND notified_at IS NOT NULL
+        '''
+        notified_params = list(student_ids)
+        if date_filter:
+            notified_query += ' AND date = ?'
+            notified_params.append(date_filter)
+        notified_count = conn.execute(notified_query, notified_params).fetchone()['cnt']
+
+        return jsonify({
+            'count': len(entries),
+            'entries': entries,
+            'notifiedCount': notified_count,
+        }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
@@ -392,6 +410,19 @@ def send_batch_notifications():
     conn = data_service.get_db()
     try:
         placeholders = ','.join('?' for _ in student_ids)
+
+        # First promote pending_teacher → completed
+        promote_query = f'''
+            UPDATE contact_books SET status = 'completed'
+            WHERE student_id IN ({placeholders})
+            AND status = 'pending_teacher'
+        '''
+        promote_params = list(student_ids)
+        if date_filter:
+            promote_query += ' AND date = ?'
+            promote_params.append(date_filter)
+        conn.execute(promote_query, promote_params)
+
         query = f'''
             SELECT student_id, date FROM contact_books
             WHERE student_id IN ({placeholders})
