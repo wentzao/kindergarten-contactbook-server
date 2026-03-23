@@ -3,6 +3,7 @@ from datetime import datetime
 from services.data_service import DataService
 import json
 import os
+import traceback
 
 notification_bp = Blueprint('notifications', __name__)
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
@@ -79,6 +80,11 @@ def ensure_tables():
                 executed_at VARCHAR(50)
             )
         ''')
+        # Fix corrupted index if any
+        try:
+            conn.execute('REINDEX notification_schedules')
+        except Exception:
+            pass
         conn.commit()
     finally:
         conn.close()
@@ -341,6 +347,30 @@ def mark_comments_read():
 
 
 # ==========================================
+# Health Check
+# ==========================================
+
+@notification_bp.route('/health', methods=['GET'])
+def health_check():
+    """Quick DB health check — useful for diagnosing 500 errors."""
+    conn = data_service.get_db()
+    try:
+        cols = [r[1] for r in conn.execute('PRAGMA table_info(contact_books)').fetchall()]
+        row_count = conn.execute('SELECT COUNT(*) as cnt FROM contact_books').fetchone()['cnt']
+        integrity = conn.execute('PRAGMA integrity_check').fetchone()[0]
+        return jsonify({
+            'status': 'ok',
+            'contactBooksColumns': cols,
+            'contactBooksRows': row_count,
+            'integrityCheck': integrity,
+        }), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e), 'trace': traceback.format_exc()}), 500
+    finally:
+        conn.close()
+
+
+# ==========================================
 # Batch Notification API
 # ==========================================
 
@@ -351,20 +381,36 @@ def get_pending_notifications():
     student_ids = data.get('studentIds', [])
     date_filter = data.get('date')
 
+    if not student_ids or not isinstance(student_ids, list):
+        return jsonify({'error': 'studentIds must be a non-empty array'}), 400
+
+    # Filter out any null/None values
+    student_ids = [sid for sid in student_ids if sid]
     if not student_ids:
-        return jsonify({'error': 'studentIds is required'}), 400
+        return jsonify({'count': 0, 'entries': [], 'notifiedCount': 0}), 200
 
     conn = data_service.get_db()
     try:
+        # Check if notified_at column exists
+        cols = [r[1] for r in conn.execute('PRAGMA table_info(contact_books)').fetchall()]
+        has_notified = 'notified_at' in cols
+
         placeholders = ','.join('?' for _ in student_ids)
 
         # Pending (un-notified, either completed or pending_teacher)
-        query = f'''
-            SELECT student_id, date, status FROM contact_books
-            WHERE student_id IN ({placeholders})
-            AND status IN ('completed', 'pending_teacher')
-            AND notified_at IS NULL
-        '''
+        if has_notified:
+            query = f'''
+                SELECT student_id, date, status FROM contact_books
+                WHERE student_id IN ({placeholders})
+                AND status IN ('completed', 'pending_teacher')
+                AND notified_at IS NULL
+            '''
+        else:
+            query = f'''
+                SELECT student_id, date, status FROM contact_books
+                WHERE student_id IN ({placeholders})
+                AND status IN ('completed', 'pending_teacher')
+            '''
         params = list(student_ids)
         if date_filter:
             query += ' AND date = ?'
@@ -373,16 +419,18 @@ def get_pending_notifications():
         entries = [{'studentId': r['student_id'], 'date': r['date'], 'status': r['status']} for r in rows]
 
         # Also count already-notified records (to distinguish "未編輯" from "已通知")
-        notified_query = f'''
-            SELECT COUNT(*) as cnt FROM contact_books
-            WHERE student_id IN ({placeholders})
-            AND notified_at IS NOT NULL
-        '''
-        notified_params = list(student_ids)
-        if date_filter:
-            notified_query += ' AND date = ?'
-            notified_params.append(date_filter)
-        notified_count = conn.execute(notified_query, notified_params).fetchone()['cnt']
+        notified_count = 0
+        if has_notified:
+            notified_query = f'''
+                SELECT COUNT(*) as cnt FROM contact_books
+                WHERE student_id IN ({placeholders})
+                AND notified_at IS NOT NULL
+            '''
+            notified_params = list(student_ids)
+            if date_filter:
+                notified_query += ' AND date = ?'
+                notified_params.append(date_filter)
+            notified_count = conn.execute(notified_query, notified_params).fetchone()['cnt']
 
         return jsonify({
             'count': len(entries),
@@ -390,6 +438,7 @@ def get_pending_notifications():
             'notifiedCount': notified_count,
         }), 200
     except Exception as e:
+        print(f'[Pending] ERROR for studentIds={student_ids[:3]}... date={date_filter}: {e}\n{traceback.format_exc()}')
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()

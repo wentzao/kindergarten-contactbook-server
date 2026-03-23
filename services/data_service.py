@@ -24,8 +24,10 @@ class DataService:
         self.db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'kindergarten.db')
 
     def get_db(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA busy_timeout=5000')
         return conn
 
     def _translate_type(self, data_type, type_value):
