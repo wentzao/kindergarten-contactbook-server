@@ -237,8 +237,8 @@ class DataService:
                     'className': r['class_name'],
                     'date': r['date'],
                     'contentBlocks': json.loads(r['content_blocks']) if r['content_blocks'] else [],
-                    'studentNotes': json.loads(r['student_notes']) if r['student_notes'] else {},
                     'editedBy': json.loads(r['edited_by']) if r['edited_by'] else None,
+                    'notifiedAt': r['notified_at'],
                     'createdAt': r['created_at'],
                     'updatedAt': r['updated_at'],
                 }
@@ -246,34 +246,45 @@ class DataService:
         finally:
             conn.close()
 
-    def save_class_journal(self, class_name, date, content_blocks, student_notes, edited_by):
+    def save_class_journal(self, class_name, date, content_blocks, edited_by):
         conn = self.get_db()
         try:
             now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S+08:00')
             journal_id = f"cj_{class_name}_{date}"
             blocks_json = json.dumps(content_blocks, ensure_ascii=False)
-            notes_json = json.dumps(student_notes, ensure_ascii=False)
             edited_json = json.dumps(edited_by, ensure_ascii=False) if edited_by else None
 
             conn.execute('''
-                INSERT INTO class_journals (id, class_name, date, content_blocks, student_notes, edited_by, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO class_journals (id, class_name, date, content_blocks, edited_by, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(class_name, date) DO UPDATE SET
                     content_blocks = excluded.content_blocks,
-                    student_notes = excluded.student_notes,
                     edited_by = excluded.edited_by,
                     updated_at = excluded.updated_at
-            ''', (journal_id, class_name, date, blocks_json, notes_json, edited_json, now, now))
+            ''', (journal_id, class_name, date, blocks_json, edited_json, now, now))
             conn.commit()
             return {
                 'id': journal_id,
                 'className': class_name,
                 'date': date,
                 'contentBlocks': content_blocks,
-                'studentNotes': student_notes,
                 'editedBy': edited_by,
                 'updatedAt': now,
             }
+        finally:
+            conn.close()
+
+    def publish_class_journal(self, class_name, date):
+        """Mark class journal as notified/published."""
+        conn = self.get_db()
+        try:
+            now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S+08:00')
+            cursor = conn.execute(
+                'UPDATE class_journals SET notified_at = ? WHERE class_name = ? AND date = ?',
+                (now, class_name, date)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
         finally:
             conn.close()
 

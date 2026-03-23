@@ -132,15 +132,31 @@ def get_available_months(student_id):
 @contact_book_bp.route('/<student_id>/<int:year>/<int:month>', methods=['GET'])
 def get_contact_book(student_id, year, month):
     version = request.args.get('version', 'original')
+    class_name = request.args.get('className')
     conn = data_service.get_db()
     try:
         rows = conn.execute('SELECT * FROM contact_books WHERE student_id = ? AND year = ? AND month = ? ORDER BY date ASC', (student_id, year, month)).fetchall()
         if not rows:
-            # We can return empty records structure like before
             return jsonify({'studentId': student_id, 'year': year, 'month': month, 'records': []}), 200
-        
+
         records = [format_record(r, version) for r in rows]
-        
+
+        # Embed class journal blocks if className is provided
+        if class_name:
+            journal_map = {}
+            journal_rows = conn.execute(
+                'SELECT date, content_blocks, updated_at, notified_at FROM class_journals WHERE class_name = ? AND date LIKE ?',
+                (class_name, f'{year}-{month:02d}-%')
+            ).fetchall()
+            for jr in journal_rows:
+                if jr['notified_at']:  # Only include published journals
+                    journal_map[jr['date']] = {
+                        'contentBlocks': load_json(jr['content_blocks']) or [],
+                        'updatedAt': jr['updated_at'],
+                    }
+            for rec in records:
+                rec['classJournal'] = journal_map.get(rec['date'])
+
         data = {
             'studentId': student_id,
             'year': year,
@@ -453,3 +469,105 @@ def delete_comment(student_id, date, comment_id):
     finally:
         conn.close()
 
+
+# ── Batch endpoints for journal editor ──
+
+@contact_book_bp.route('/batch/<class_name>/<date>/teacher', methods=['PUT'])
+def batch_save_teacher(class_name, date):
+    """Batch save teacher entries for multiple students (from journal editor auto-save).
+    Sets status to 'pending_teacher' (draft, not visible to parents)."""
+    body = request.get_json()
+    if not body or 'students' not in body:
+        return jsonify({'error': 'Missing students data'}), 400
+
+    students_data = body['students']
+    edited_by_raw = body.get('editedBy')
+    edited_by = None
+    if edited_by_raw:
+        edited_by_raw['editedAt'] = datetime.now().isoformat()
+        edited_by = json.dumps(edited_by_raw, ensure_ascii=False)
+
+    year, month, _day = map(int, date.split('-'))
+    conn = data_service.get_db()
+    try:
+        saved_count = 0
+        for student_id, note_data in students_data.items():
+            # Extract fields that have their own DB columns
+            raw_items = note_data.pop('itemsToBring', None)
+            if raw_items and isinstance(raw_items, list) and len(raw_items) > 0:
+                items_to_bring = json.dumps({'items': raw_items}, ensure_ascii=False)
+            else:
+                items_to_bring = None
+
+            raw_returned = note_data.pop('returnedItems', None)
+            if raw_returned and isinstance(raw_returned, list) and len(raw_returned) > 0:
+                returned_items = json.dumps(raw_returned, ensure_ascii=False)
+            else:
+                returned_items = None
+
+            survey_id = note_data.pop('surveyId', None) or None
+            teacher_json = json.dumps(note_data, ensure_ascii=False)
+
+            row = conn.execute(
+                'SELECT id, status FROM contact_books WHERE student_id = ? AND date = ?',
+                (student_id, date)
+            ).fetchone()
+
+            if not row:
+                conn.execute('''
+                    INSERT INTO contact_books (student_id, date, year, month, status, original_teacher,
+                        items_to_bring, returned_items, survey_id, edited_by, last_modified)
+                    VALUES (?, ?, ?, ?, 'pending_teacher', ?, ?, ?, ?, ?, ?)
+                ''', (student_id, date, year, month, teacher_json,
+                      items_to_bring, returned_items, survey_id, edited_by, datetime.now().isoformat()))
+            else:
+                # Only update if still in draft state (don't overwrite completed/read/signed records)
+                current_status = row['status']
+                new_status = current_status if current_status in ('completed', 'read', 'signed') else 'pending_teacher'
+                conn.execute('''
+                    UPDATE contact_books SET original_teacher = ?, items_to_bring = ?,
+                        returned_items = ?, survey_id = ?, edited_by = ?, status = ?, last_modified = ?
+                    WHERE student_id = ? AND date = ?
+                ''', (teacher_json, items_to_bring, returned_items, survey_id,
+                      edited_by, new_status, datetime.now().isoformat(), student_id, date))
+            saved_count += 1
+
+        conn.commit()
+        return jsonify({'status': 'saved', 'count': saved_count}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@contact_book_bp.route('/class/<class_name>/<date>/teacher', methods=['GET'])
+def get_class_date_teacher(class_name, date):
+    """Get all students' contact_book records for a class+date (journal editor load).
+    Returns map: { studentId: { original_teacher fields } }"""
+    conn = data_service.get_db()
+    try:
+        # Since contact_books doesn't store class_name, fetch ALL records for this date
+        # and let the frontend filter by its student list.
+        rows = conn.execute(
+            'SELECT student_id, original_teacher, items_to_bring, returned_items, survey_id FROM contact_books WHERE date = ?',
+            (date,)
+        ).fetchall()
+
+        result = {}
+        for r in rows:
+            teacher_data = load_json(r['original_teacher']) or {}
+            items = load_json(r['items_to_bring'])
+            if items and 'items' in items:
+                teacher_data['itemsToBring'] = items['items']
+            returned = load_json(r['returned_items'])
+            if returned:
+                teacher_data['returnedItems'] = returned
+            if r['survey_id']:
+                teacher_data['surveyId'] = r['survey_id']
+            result[r['student_id']] = teacher_data
+
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
