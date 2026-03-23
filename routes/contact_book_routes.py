@@ -84,17 +84,15 @@ def format_record(r, version='original'):
         except:
             stored_dow = ''
     
-    # Normalize status: 'completed' means teacher filled but parent hasn't read yet
     status = r['status']
-    if status == 'completed':
-        status = 'pending_parent'
-    
+
     rec = {
         'date': date_str,
         'dayOfWeek': stored_dow,
         'status': status,
         'readAt': r['read_at'],
         'signedAt': r['signed_at'],
+        'notifiedAt': r['notified_at'],
         'itemsToBring': load_json(r['items_to_bring']),
         'returnedItems': load_json(r['returned_items']) or [],
         'attachedItems': load_json(r['attached_items']) or [],
