@@ -25,6 +25,7 @@ CREATE TABLE contact_books (
     survey_id VARCHAR(50),
     edited_by TEXT,
     last_modified VARCHAR(50),
+    notified_at VARCHAR(50),
     UNIQUE(student_id, date)
 );
 CREATE INDEX idx_cb_student_ym ON contact_books(student_id, year, month);
@@ -120,8 +121,8 @@ CREATE TABLE class_journals (
     class_name VARCHAR(100) NOT NULL,
     date VARCHAR(20) NOT NULL,
     content_blocks TEXT DEFAULT '[]',
-    student_notes TEXT DEFAULT '{}',
     edited_by TEXT,
+    notified_at VARCHAR(50),
     created_at VARCHAR(50),
     updated_at VARCHAR(50),
     UNIQUE(class_name, date)
