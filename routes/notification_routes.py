@@ -418,11 +418,12 @@ def get_pending_notifications():
         rows = conn.execute(query, params).fetchall()
         entries = [{'studentId': r['student_id'], 'date': r['date'], 'status': r['status']} for r in rows]
 
-        # Also count already-notified records (to distinguish "未編輯" from "已通知")
+        # Also get already-notified student IDs (to distinguish "未編輯" from "已通知" per-class)
+        notified_student_ids = []
         notified_count = 0
         if has_notified:
             notified_query = f'''
-                SELECT COUNT(*) as cnt FROM contact_books
+                SELECT student_id FROM contact_books
                 WHERE student_id IN ({placeholders})
                 AND notified_at IS NOT NULL
             '''
@@ -430,12 +431,15 @@ def get_pending_notifications():
             if date_filter:
                 notified_query += ' AND date = ?'
                 notified_params.append(date_filter)
-            notified_count = conn.execute(notified_query, notified_params).fetchone()['cnt']
+            notified_rows = conn.execute(notified_query, notified_params).fetchall()
+            notified_student_ids = [r['student_id'] for r in notified_rows]
+            notified_count = len(notified_student_ids)
 
         return jsonify({
             'count': len(entries),
             'entries': entries,
             'notifiedCount': notified_count,
+            'notifiedStudentIds': notified_student_ids,
         }), 200
     except Exception as e:
         print(f'[Pending] ERROR for studentIds={student_ids[:3]}... date={date_filter}: {e}\n{traceback.format_exc()}')
