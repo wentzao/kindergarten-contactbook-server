@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 import os, json, threading
+from datetime import datetime
 
 journal_bp = Blueprint('journal', __name__)
 
@@ -60,15 +61,16 @@ def publish_journal(class_name, date):
     # 1. Mark class journal as published
     data_service.publish_class_journal(class_name, date)
 
-    # 2. Batch update contact_books: pending_teacher → completed
+    # 2. Batch update contact_books: draft → notified
     conn = data_service.get_db()
     try:
         if student_ids:
+            now = datetime.now().isoformat()
             placeholders = ','.join(['?'] * len(student_ids))
             conn.execute(f'''
-                UPDATE contact_books SET status = 'completed'
-                WHERE student_id IN ({placeholders}) AND date = ? AND status = 'pending_teacher'
-            ''', (*student_ids, date))
+                UPDATE contact_books SET status = 'notified', notified_at = ?
+                WHERE student_id IN ({placeholders}) AND date = ? AND status = 'draft'
+            ''', (now, *student_ids, date))
             conn.commit()
     finally:
         conn.close()

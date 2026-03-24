@@ -3,8 +3,11 @@ import requests
 import os
 import time
 from datetime import datetime
+from services.data_service import DataService
 
 auth_bp = Blueprint('auth_bp', __name__)
+_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
+_data_service = DataService(_DATA_DIR)
 
 # 透過 web.wentzao.com 的 API 取得教師資料（取代直接讀取網路磁碟上的 JSON 檔案）
 WEB_WENTZAO_TEACHER_AUTH_API = 'https://web.wentzao.com/api/get_teacher_for_auth'
@@ -62,6 +65,25 @@ def _do_teacher_auth_raw(user_id):
     return resp.json(), resp.status_code
 
 
+def _cache_teacher_profile(user_id, teacher_data):
+    """Cache teacher cname/ename in teacher_profiles table on successful login."""
+    try:
+        conn = _data_service.get_db()
+        now = datetime.now().isoformat()
+        conn.execute('''
+            INSERT INTO teacher_profiles (user_id, cname, ename, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                cname = excluded.cname,
+                ename = excluded.ename,
+                updated_at = excluded.updated_at
+        ''', (user_id, teacher_data.get('cname', ''), teacher_data.get('ename', ''), now))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f'[Auth] Failed to cache teacher profile: {e}')
+
+
 @auth_bp.route('/teacher_login', methods=['POST'])
 def teacher_login():
     data = request.json
@@ -71,7 +93,11 @@ def teacher_login():
     user_id = data.get('userId')
 
     try:
-        return _do_teacher_auth(user_id)
+        result = _do_teacher_auth_raw(user_id)
+        teacher_data, status_code = result
+        if status_code == 200:
+            _cache_teacher_profile(user_id, teacher_data)
+        return jsonify(teacher_data), status_code
     except requests.exceptions.Timeout:
         return jsonify({'error': 'web.wentzao.com API timeout'}), 504
     except requests.exceptions.ConnectionError:
@@ -267,6 +293,26 @@ def check_login():
 
     if token in _pending_logins:
         result = _pending_logins.pop(token)
-        return jsonify(result['userData']), 200
+        teacher_data = result['userData']
+        # Also cache teacher profile on PWA login
+        if 'userId' in teacher_data:
+            _cache_teacher_profile(teacher_data['userId'], teacher_data)
+        return jsonify(teacher_data), 200
     else:
         return jsonify({'error': 'Login not completed yet'}), 404
+
+
+@auth_bp.route('/teacher_profiles', methods=['GET'])
+def get_teacher_profiles():
+    """Return all cached teacher profiles (for name resolution)."""
+    conn = None
+    try:
+        conn = _data_service.get_db()
+        rows = conn.execute('SELECT user_id, cname, ename FROM teacher_profiles').fetchall()
+        profiles = {r['user_id']: {'cname': r['cname'], 'ename': r['ename']} for r in rows}
+        return jsonify(profiles), 200
+    except Exception:
+        return jsonify({}), 200
+    finally:
+        if conn:
+            conn.close()

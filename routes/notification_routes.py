@@ -16,10 +16,10 @@ def ensure_tables():
     try:
         conn = data_service.get_db()
         conn.executescript('''
-            CREATE TABLE IF NOT EXISTS student_names (
-                student_id VARCHAR(50) PRIMARY KEY,
-                chinese_name VARCHAR(100),
-                english_name VARCHAR(100),
+            CREATE TABLE IF NOT EXISTS teacher_profiles (
+                user_id VARCHAR(100) PRIMARY KEY,
+                cname VARCHAR(100),
+                ename VARCHAR(100),
                 updated_at VARCHAR(50)
             );
 
@@ -407,26 +407,14 @@ def get_pending_notifications():
     conn = None
     try:
         conn = data_service.get_db()
-        # Check if notified_at column exists
-        cols = [r[1] for r in conn.execute('PRAGMA table_info(contact_books)').fetchall()]
-        has_notified = 'notified_at' in cols
-
         placeholders = ','.join('?' for _ in student_ids)
 
-        # Pending (un-notified, either completed or pending_teacher)
-        if has_notified:
-            query = f'''
-                SELECT student_id, date, status FROM contact_books
-                WHERE student_id IN ({placeholders})
-                AND status IN ('completed', 'pending_teacher')
-                AND notified_at IS NULL
-            '''
-        else:
-            query = f'''
-                SELECT student_id, date, status FROM contact_books
-                WHERE student_id IN ({placeholders})
-                AND status IN ('completed', 'pending_teacher')
-            '''
+        # Draft entries (teacher saved but not yet notified)
+        query = f'''
+            SELECT student_id, date, status FROM contact_books
+            WHERE student_id IN ({placeholders})
+            AND status = 'draft'
+        '''
         params = list(student_ids)
         if date_filter:
             query += ' AND date = ?'
@@ -434,22 +422,19 @@ def get_pending_notifications():
         rows = conn.execute(query, params).fetchall()
         entries = [{'studentId': r['student_id'], 'date': r['date'], 'status': r['status']} for r in rows]
 
-        # Also get already-notified student IDs (to distinguish "未編輯" from "已通知" per-class)
-        notified_student_ids = []
-        notified_count = 0
-        if has_notified:
-            notified_query = f'''
-                SELECT student_id FROM contact_books
-                WHERE student_id IN ({placeholders})
-                AND notified_at IS NOT NULL
-            '''
-            notified_params = list(student_ids)
-            if date_filter:
-                notified_query += ' AND date = ?'
-                notified_params.append(date_filter)
-            notified_rows = conn.execute(notified_query, notified_params).fetchall()
-            notified_student_ids = [r['student_id'] for r in notified_rows]
-            notified_count = len(notified_student_ids)
+        # Already-notified student IDs (status in notified/read/signed)
+        notified_query = f'''
+            SELECT student_id FROM contact_books
+            WHERE student_id IN ({placeholders})
+            AND status IN ('notified', 'read', 'signed')
+        '''
+        notified_params = list(student_ids)
+        if date_filter:
+            notified_query += ' AND date = ?'
+            notified_params.append(date_filter)
+        notified_rows = conn.execute(notified_query, notified_params).fetchall()
+        notified_student_ids = [r['student_id'] for r in notified_rows]
+        notified_count = len(notified_student_ids)
 
         return jsonify({
             'count': len(entries),
@@ -482,23 +467,11 @@ def send_batch_notifications():
         conn = data_service.get_db()
         placeholders = ','.join('?' for _ in student_ids)
 
-        # First promote pending_teacher → completed
-        promote_query = f'''
-            UPDATE contact_books SET status = 'completed'
-            WHERE student_id IN ({placeholders})
-            AND status = 'pending_teacher'
-        '''
-        promote_params = list(student_ids)
-        if date_filter:
-            promote_query += ' AND date = ?'
-            promote_params.append(date_filter)
-        conn.execute(promote_query, promote_params)
-
+        # Find draft entries to promote to notified
         query = f'''
             SELECT student_id, date FROM contact_books
             WHERE student_id IN ({placeholders})
-            AND status = 'completed'
-            AND notified_at IS NULL
+            AND status = 'draft'
         '''
         params = list(student_ids)
         if date_filter:
@@ -507,7 +480,7 @@ def send_batch_notifications():
 
         rows = conn.execute(query, params).fetchall()
         if not rows:
-            return jsonify({'sent': 0, 'total': 0, 'message': 'No pending notifications'}), 200
+            return jsonify({'sent': 0, 'total': 0, 'message': 'No draft entries to notify'}), 200
 
         now = datetime.now().isoformat()
         sent_count = 0
@@ -529,9 +502,10 @@ def send_batch_notifications():
                     print(f'[Notification] Batch send error for {s_id}: {e}')
             threading.Thread(target=_send, daemon=True).start()
 
+            # draft → notified
             conn.execute(
-                'UPDATE contact_books SET notified_at = ? WHERE student_id = ? AND date = ?',
-                (now, sid, d)
+                'UPDATE contact_books SET status = ?, notified_at = ? WHERE student_id = ? AND date = ?',
+                ('notified', now, sid, d)
             )
             sent_count += 1
 
@@ -870,16 +844,12 @@ def _run_onetime_notification(schedule_id):
                 (datetime.now().strftime('%Y-%m-%dT%H:%M:%S+08:00'), class_name, target_date)
             )
 
-        # 2. Update contact_books: pending_teacher → completed, set notified_at
+        # 2. Update contact_books: draft → notified
         now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S+08:00')
         placeholders = ','.join('?' for _ in student_ids)
         conn.execute(f'''
-            UPDATE contact_books SET status = 'completed'
-            WHERE student_id IN ({placeholders}) AND date = ? AND status = 'pending_teacher'
-        ''', (*student_ids, target_date))
-        conn.execute(f'''
-            UPDATE contact_books SET notified_at = ?
-            WHERE student_id IN ({placeholders}) AND date = ? AND notified_at IS NULL
+            UPDATE contact_books SET status = 'notified', notified_at = ?
+            WHERE student_id IN ({placeholders}) AND date = ? AND status = 'draft'
         ''', (now, *student_ids, target_date))
 
         # 3. Mark schedule as executed

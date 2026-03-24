@@ -4,6 +4,15 @@ CREATE TABLE students (
     guardians TEXT
 );
 
+-- Teacher identity cache (upserted on login)
+DROP TABLE IF EXISTS teacher_profiles;
+CREATE TABLE teacher_profiles (
+    user_id VARCHAR(100) PRIMARY KEY,
+    cname VARCHAR(100),
+    ename VARCHAR(100),
+    updated_at VARCHAR(50)
+);
+
 DROP TABLE IF EXISTS contact_books;
 CREATE TABLE contact_books (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -12,20 +21,24 @@ CREATE TABLE contact_books (
     year INTEGER NOT NULL,
     month INTEGER NOT NULL,
     day_of_week VARCHAR(10),
-    status VARCHAR(50),
+    -- Status: draft → notified → read → signed
+    status VARCHAR(20) DEFAULT 'draft',
+    notified_at VARCHAR(50),
     read_at VARCHAR(50),
     signed_at VARCHAR(50),
+    -- Teacher content
+    original_teacher TEXT,
+    edited_by TEXT,
+    -- Parent content
+    original_parent TEXT,
+    -- Extras
     items_to_bring TEXT,
     returned_items TEXT,
     attached_items TEXT,
-    original_teacher TEXT,
-    original_parent TEXT,
-    redacted TEXT,
     comments TEXT,
     survey_id VARCHAR(50),
-    edited_by TEXT,
+    redacted TEXT,
     last_modified VARCHAR(50),
-    notified_at VARCHAR(50),
     UNIQUE(student_id, date)
 );
 CREATE INDEX idx_cb_student_ym ON contact_books(student_id, year, month);

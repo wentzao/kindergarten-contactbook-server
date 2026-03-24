@@ -74,7 +74,26 @@ def load_json(val):
 
 DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六']
 
-def format_record(r, version='original'):
+def _resolve_teacher_name(user_id, profiles):
+    """Resolve userId to {cname, ename} from teacher_profiles cache."""
+    if not user_id or not profiles:
+        return None
+    p = profiles.get(user_id)
+    if p:
+        return {'userId': user_id, 'cname': p.get('cname', ''), 'ename': p.get('ename', '')}
+    return {'userId': user_id, 'cname': '', 'ename': ''}
+
+
+def _load_teacher_profiles(conn):
+    """Load all teacher profiles from DB into a dict."""
+    try:
+        rows = conn.execute('SELECT user_id, cname, ename FROM teacher_profiles').fetchall()
+        return {r['user_id']: {'cname': r['cname'], 'ename': r['ename']} for r in rows}
+    except Exception:
+        return {}
+
+
+def format_record(r, version='original', teacher_profiles=None):
     # Compute dayOfWeek from date if not stored
     date_str = r['date']
     stored_dow = r['day_of_week']
@@ -85,8 +104,28 @@ def format_record(r, version='original'):
             stored_dow = DAY_NAMES[(dow_index + 1) % 7]  # Convert to Chinese
         except:
             stored_dow = ''
-    
+
     status = r['status']
+
+    # Resolve editedBy userId → cname/ename
+    edited_by_raw = load_json(r['edited_by'])
+    if edited_by_raw and teacher_profiles:
+        uid = edited_by_raw.get('userId', '')
+        resolved = _resolve_teacher_name(uid, teacher_profiles)
+        if resolved:
+            edited_by_raw['cname'] = resolved['cname']
+            edited_by_raw['ename'] = resolved['ename']
+
+    # Resolve comment sender names
+    comments = load_json(r['comments']) or []
+    if teacher_profiles:
+        for c in comments:
+            sid = c.get('senderId', '')
+            if sid and sid != 'parent':
+                resolved = _resolve_teacher_name(sid, teacher_profiles)
+                if resolved:
+                    c['cname'] = resolved['cname']
+                    c['ename'] = resolved['ename']
 
     rec = {
         'date': date_str,
@@ -103,11 +142,11 @@ def format_record(r, version='original'):
             'parent': load_json(r['original_parent'])
         },
         'redacted': load_json(r['redacted']),
-        'comments': load_json(r['comments']) or [],
+        'comments': comments,
         'surveyId': r['survey_id'],
-        'editedBy': load_json(r['edited_by']) if r['edited_by'] else None
+        'editedBy': edited_by_raw,
     }
-    
+
     # Apply versioning overlay (original or redacted)
     if version == 'redacted' and rec['redacted']:
         rec['teacher'] = rec['redacted'].get('teacher')
@@ -115,7 +154,7 @@ def format_record(r, version='original'):
     else:
         rec['teacher'] = rec['original'].get('teacher')
         rec['parent'] = rec['original'].get('parent')
-        
+
     return rec
 
 @contact_book_bp.route('/<student_id>/months', methods=['GET'])
@@ -135,11 +174,12 @@ def get_contact_book(student_id, year, month):
     class_name = request.args.get('className')
     conn = data_service.get_db()
     try:
+        profiles = _load_teacher_profiles(conn)
         rows = conn.execute('SELECT * FROM contact_books WHERE student_id = ? AND year = ? AND month = ? ORDER BY date ASC', (student_id, year, month)).fetchall()
         if not rows:
             return jsonify({'studentId': student_id, 'year': year, 'month': month, 'records': []}), 200
 
-        records = [format_record(r, version) for r in rows]
+        records = [format_record(r, version, profiles) for r in rows]
 
         # Embed class journal blocks if className is provided
         if class_name:
@@ -180,7 +220,7 @@ def update_parent_entry(student_id, date):
         if not row:
             conn.execute('''
                 INSERT INTO contact_books (student_id, date, year, month, status, original_parent, last_modified)
-                VALUES (?, ?, ?, ?, 'pending_teacher', ?, ?)
+                VALUES (?, ?, ?, ?, 'draft', ?, ?)
             ''', (student_id, date, year, month, json.dumps(data, ensure_ascii=False), datetime.now().isoformat()))
         else:
             conn.execute('UPDATE contact_books SET original_parent = ?, last_modified = ? WHERE student_id = ? AND date = ?',
@@ -200,11 +240,13 @@ def update_teacher_entry(student_id, date):
     # Extract fields that have their own DB columns (not stored inside teacher JSON)
     survey_id = data.pop('surveyId', None) or None
     
-    # Extract editedBy info (teacher identity)
+    # Extract editedBy — store only userId + timestamp (names resolved via teacher_profiles)
     edited_by_raw = data.pop('editedBy', None)
     if edited_by_raw:
-        edited_by_raw['editedAt'] = datetime.now().isoformat()
-        edited_by = json.dumps(edited_by_raw, ensure_ascii=False)
+        edited_by = json.dumps({
+            'userId': edited_by_raw.get('userId', ''),
+            'editedAt': datetime.now().isoformat(),
+        }, ensure_ascii=False)
     else:
         edited_by = None
     
@@ -232,17 +274,20 @@ def update_teacher_entry(student_id, date):
         row = conn.execute('SELECT id FROM contact_books WHERE student_id = ? AND date = ?', (student_id, date)).fetchone()
         if not row:
             conn.execute('''
-                INSERT INTO contact_books (student_id, date, year, month, status, original_teacher, 
+                INSERT INTO contact_books (student_id, date, year, month, status, original_teacher,
                     items_to_bring, returned_items, attached_items, survey_id, edited_by, last_modified)
-                VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?)
             ''', (student_id, date, year, month, json.dumps(data, ensure_ascii=False),
                   items_to_bring, returned_items, attached_items, survey_id, edited_by, datetime.now().isoformat()))
         else:
+            # Don't downgrade status if already notified/read/signed
+            current = conn.execute('SELECT status FROM contact_books WHERE student_id = ? AND date = ?', (student_id, date)).fetchone()
+            new_status = current['status'] if current and current['status'] in ('notified', 'read', 'signed') else 'draft'
             conn.execute('''UPDATE contact_books SET original_teacher = ?, items_to_bring = ?,
                 returned_items = ?, attached_items = ?, survey_id = ?, edited_by = ?, status = ?, last_modified = ?
                 WHERE student_id = ? AND date = ?''',
                 (json.dumps(data, ensure_ascii=False), items_to_bring, returned_items,
-                 attached_items, survey_id, edited_by, 'completed', datetime.now().isoformat(), student_id, date))
+                 attached_items, survey_id, edited_by, new_status, datetime.now().isoformat(), student_id, date))
         conn.commit()
 
         # Note: parent notification is no longer sent immediately on teacher save.
@@ -260,8 +305,9 @@ def get_latest_records(student_id):
     limit = request.args.get('limit', 10, type=int)
     conn = data_service.get_db()
     try:
+        profiles = _load_teacher_profiles(conn)
         rows = conn.execute('SELECT * FROM contact_books WHERE student_id = ? ORDER BY date DESC LIMIT ?', (student_id, limit)).fetchall()
-        records = [format_record(r, 'original') for r in rows]
+        records = [format_record(r, 'original', profiles) for r in rows]
         return jsonify(records), 200
     finally:
         conn.close()
@@ -276,7 +322,7 @@ def mark_as_read(student_id, date):
             return jsonify({'error': 'Record not found'}), 404
         
         status_changed = False
-        if row['status'] in ('pending_parent', 'completed'):
+        if row['status'] == 'notified':
             read_at = data.get('readAt') or datetime.now().isoformat()
             conn.execute('UPDATE contact_books SET status = ?, read_at = ?, last_modified = ? WHERE student_id = ? AND date = ?',
                          ('read', read_at, datetime.now().isoformat(), student_id, date))
@@ -369,8 +415,16 @@ def handle_comments(student_id, date):
             return jsonify({'error': 'Record not found'}), 404
             
         comments = load_json(row['comments']) or []
-        
+
         if request.method == 'GET':
+            # Resolve teacher names in comments
+            profiles = _load_teacher_profiles(conn)
+            for c in comments:
+                sid = c.get('senderId', '')
+                if sid and sid != 'parent' and profiles:
+                    tp = profiles.get(sid, {})
+                    c['cname'] = tp.get('cname', '')
+                    c['ename'] = tp.get('ename', '')
             return jsonify(comments), 200
             
         elif request.method == 'POST':
@@ -379,41 +433,55 @@ def handle_comments(student_id, date):
                 return jsonify({'error': 'Content is required'}), 400
             
             now_iso = datetime.now().isoformat()
+            sender_role = data.get('senderRole', 'parent')
+            # For teachers: store userId as senderId (names resolved on read via teacher_profiles)
+            # For parents: store 'parent' as senderId, name from data
+            sender_id = data.get('senderId', 'parent')
             comment = {
-                'id': f"{student_id}_{date}_{datetime.now().timestamp():.6f}",  # Stable unique ID
-                'senderId': data.get('senderId', 'parent'),
-                'name': data.get('name', '家長'),
-                'cname': data.get('cname', ''),
-                'ename': data.get('ename', ''),
+                'id': f"{student_id}_{date}_{datetime.now().timestamp():.6f}",
+                'senderId': sender_id,
+                'senderRole': sender_role,
                 'content': data['content'],
-                'createdAt': now_iso
+                'createdAt': now_iso,
             }
+            # Only store name for parents (teacher names resolved dynamically)
+            if sender_role == 'parent':
+                comment['name'] = data.get('name', '家長')
             comments.append(comment)
-            
+
             conn.execute('UPDATE contact_books SET comments = ?, last_modified = ? WHERE student_id = ? AND date = ?',
                          (json.dumps(comments, ensure_ascii=False), now_iso, student_id, date))
             conn.commit()
-            
-            # Send push notification based on sender role
-            sender_name = comment['name']
+
+            # Resolve teacher name for notification push text
+            profiles = _load_teacher_profiles(conn)
+            if sender_role in ('teacher', 'admin'):
+                tp = profiles.get(sender_id, {})
+                sender_display = tp.get('ename') or tp.get('cname') or '老師'
+            else:
+                sender_display = data.get('name', '家長')
+
+            # Enrich returned comment with resolved names
+            if sender_role in ('teacher', 'admin'):
+                tp = profiles.get(sender_id, {})
+                comment['cname'] = tp.get('cname', '')
+                comment['ename'] = tp.get('ename', '')
+
             content_preview = comment['content']
             student_name = data.get('studentName') or student_id
-            sender_role = data.get('senderRole', 'parent')
 
             def _send_bg():
                 if sender_role in ('teacher', 'admin'):
-                    # Teacher posted a comment → notify parents of this student
                     notify = _get_parent_comment_notifier()
                     if notify:
-                        notify(data_service, student_id, student_name, sender_name, content_preview, date)
+                        notify(data_service, student_id, student_name, sender_display, content_preview, date)
                 else:
-                    # Parent posted a comment → notify teachers/admins
                     notify = _get_notifier()
                     if notify:
-                        notify(data_service, student_id, student_name, sender_name, content_preview, date)
+                        notify(data_service, student_id, student_name, sender_display, content_preview, date)
 
             threading.Thread(target=_send_bg, daemon=True).start()
-            
+
             return jsonify(comment), 201
             
     except Exception as e:
@@ -475,7 +543,7 @@ def delete_comment(student_id, date, comment_id):
 @contact_book_bp.route('/batch/<class_name>/<date>/teacher', methods=['PUT'])
 def batch_save_teacher(class_name, date):
     """Batch save teacher entries for multiple students (from journal editor auto-save).
-    Sets status to 'pending_teacher' (draft, not visible to parents)."""
+    Sets status to 'draft' (not visible to parents until notified)."""
     body = request.get_json()
     if not body or 'students' not in body:
         return jsonify({'error': 'Missing students data'}), 400
@@ -484,8 +552,10 @@ def batch_save_teacher(class_name, date):
     edited_by_raw = body.get('editedBy')
     edited_by = None
     if edited_by_raw:
-        edited_by_raw['editedAt'] = datetime.now().isoformat()
-        edited_by = json.dumps(edited_by_raw, ensure_ascii=False)
+        edited_by = json.dumps({
+            'userId': edited_by_raw.get('userId', ''),
+            'editedAt': datetime.now().isoformat(),
+        }, ensure_ascii=False)
 
     year, month, _day = map(int, date.split('-'))
     conn = data_service.get_db()
@@ -517,13 +587,13 @@ def batch_save_teacher(class_name, date):
                 conn.execute('''
                     INSERT INTO contact_books (student_id, date, year, month, status, original_teacher,
                         items_to_bring, returned_items, survey_id, edited_by, last_modified)
-                    VALUES (?, ?, ?, ?, 'pending_teacher', ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)
                 ''', (student_id, date, year, month, teacher_json,
                       items_to_bring, returned_items, survey_id, edited_by, datetime.now().isoformat()))
             else:
-                # Only update if still in draft state (don't overwrite completed/read/signed records)
+                # Don't downgrade status if already notified/read/signed
                 current_status = row['status']
-                new_status = current_status if current_status in ('completed', 'read', 'signed') else 'pending_teacher'
+                new_status = current_status if current_status in ('notified', 'read', 'signed') else 'draft'
                 conn.execute('''
                     UPDATE contact_books SET original_teacher = ?, items_to_bring = ?,
                         returned_items = ?, survey_id = ?, edited_by = ?, status = ?, last_modified = ?
