@@ -245,8 +245,9 @@ def send_to_student_parents(data_service, student_id, title, body, data=None, pr
         print(f'[Notification] Found {len(rows)} parent token rows in DB')
 
         # Build set of opted-out user_ids
+        _VALID_PREF_COLUMNS = {'contact_book_notify', 'announcement_notify'}
         opted_out = set()
-        if pref_column:
+        if pref_column and pref_column in _VALID_PREF_COLUMNS:
             pref_rows = conn.execute(
                 f"SELECT user_id FROM notification_preferences WHERE {pref_column} = 0"
             ).fetchall()

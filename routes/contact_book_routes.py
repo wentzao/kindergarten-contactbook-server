@@ -11,8 +11,9 @@ data_service = DataService(DATA_DIR)
 
 # Auto-migrate: add edited_by column if missing
 def _auto_migrate():
-    conn = data_service.get_db()
+    conn = None
     try:
+        conn = data_service.get_db()
         cols = [row[1] for row in conn.execute('PRAGMA table_info(contact_books)').fetchall()]
         if 'edited_by' not in cols:
             conn.execute('ALTER TABLE contact_books ADD COLUMN edited_by TEXT')
@@ -21,7 +22,8 @@ def _auto_migrate():
     except Exception as e:
         print(f'[Migration] Error: {e}')
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 _auto_migrate()
 

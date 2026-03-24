@@ -12,9 +12,17 @@ data_service = DataService(DATA_DIR)
 
 def ensure_tables():
     """Create notification tables if they don't exist."""
-    conn = data_service.get_db()
+    conn = None
     try:
+        conn = data_service.get_db()
         conn.executescript('''
+            CREATE TABLE IF NOT EXISTS student_names (
+                student_id VARCHAR(50) PRIMARY KEY,
+                chinese_name VARCHAR(100),
+                english_name VARCHAR(100),
+                updated_at VARCHAR(50)
+            );
+
             CREATE TABLE IF NOT EXISTS push_tokens (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id VARCHAR(100) NOT NULL,
@@ -93,7 +101,8 @@ def ensure_tables():
         except Exception:
             pass
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 # Run on import to ensure tables
@@ -468,8 +477,9 @@ def send_batch_notifications():
     if not student_ids:
         return jsonify({'error': 'studentIds is required'}), 400
 
-    conn = data_service.get_db()
+    conn = None
     try:
+        conn = data_service.get_db()
         placeholders = ','.join('?' for _ in student_ids)
 
         # First promote pending_teacher → completed
@@ -530,7 +540,8 @@ def send_batch_notifications():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 # ==========================================
@@ -758,8 +769,9 @@ def init_scheduler(scheduler):
 def _load_pending_schedules():
     """On startup: load pending schedules and register APScheduler jobs.
     If scheduled_at has already passed, execute immediately."""
-    conn = data_service.get_db()
+    conn = None
     try:
+        conn = data_service.get_db()
         rows = conn.execute(
             "SELECT id, scheduled_at FROM notification_schedules WHERE status = 'pending'"
         ).fetchall()
@@ -786,7 +798,8 @@ def _load_pending_schedules():
         if loaded:
             print(f'[Scheduler] Loaded {loaded} pending notification schedule(s)')
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 def _register_onetime_job(schedule_id, scheduled_at_str):
@@ -830,8 +843,9 @@ def _run_onetime_notification(schedule_id):
     import threading
 
     print(f'[Scheduler] Running one-time notification for schedule {schedule_id}')
-    conn = data_service.get_db()
+    conn = None
     try:
+        conn = data_service.get_db()
         row = conn.execute(
             "SELECT * FROM notification_schedules WHERE id = ? AND status = 'pending'",
             (schedule_id,)
@@ -893,5 +907,6 @@ def _run_onetime_notification(schedule_id):
     except Exception as e:
         print(f'[Scheduler] Error executing schedule {schedule_id}: {e}')
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
