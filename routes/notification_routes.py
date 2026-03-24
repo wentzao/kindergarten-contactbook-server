@@ -47,6 +47,17 @@ def ensure_tables():
                 last_read_at VARCHAR(50) NOT NULL,
                 PRIMARY KEY (teacher_id, student_id)
             );
+
+            CREATE TABLE IF NOT EXISTS notification_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                class_name VARCHAR(100) NOT NULL,
+                date VARCHAR(20) NOT NULL,
+                student_count INTEGER NOT NULL,
+                student_ids TEXT,
+                sent_by VARCHAR(100),
+                sent_at VARCHAR(50) NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_nlog_class_date ON notification_logs(class_name, date);
         ''')
         # Migration: add role column if it doesn't exist
         try:
@@ -66,33 +77,6 @@ def ensure_tables():
             conn.commit()
         except Exception:
             pass  # Column already exists
-        # Migration: recreate notification_schedules with new one-time schema
-        # Check if old schema (has 'send_time' column) and migrate
-        old_cols = [r[1] for r in conn.execute('PRAGMA table_info(notification_schedules)').fetchall()]
-        if old_cols and 'send_time' in old_cols:
-            conn.execute('DROP TABLE notification_schedules')
-            print('[Migration] Dropped old notification_schedules (recurring schema)')
-
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS notification_schedules (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                class_name VARCHAR(50),
-                target_date VARCHAR(20) NOT NULL,
-                student_ids TEXT,
-                student_names TEXT,
-                scheduled_at VARCHAR(50) NOT NULL,
-                teacher_id VARCHAR(100),
-                teacher_name VARCHAR(100),
-                status VARCHAR(20) DEFAULT 'pending',
-                created_at VARCHAR(50),
-                executed_at VARCHAR(50)
-            )
-        ''')
-        # Fix corrupted index if any
-        try:
-            conn.execute('REINDEX notification_schedules')
-        except Exception:
-            pass
         conn.commit()
 
         # Enable WAL mode once at startup (safe here — no concurrent connections yet)
@@ -518,140 +502,6 @@ def send_batch_notifications():
             conn.close()
 
 
-# ==========================================
-# Notification Schedule API (one-time schedules)
-# ==========================================
-
-def _format_schedule(row):
-    """Format a notification_schedules DB row to JSON response."""
-    return {
-        'id': row['id'],
-        'className': row['class_name'],
-        'targetDate': row['target_date'],
-        'studentIds': json.loads(row['student_ids']) if row['student_ids'] else [],
-        'studentNames': json.loads(row['student_names']) if row['student_names'] else {},
-        'scheduledAt': row['scheduled_at'],
-        'teacherId': row['teacher_id'],
-        'teacherName': row['teacher_name'],
-        'status': row['status'],
-        'createdAt': row['created_at'],
-        'executedAt': row['executed_at'],
-    }
-
-
-@notification_bp.route('/schedules', methods=['GET'])
-def get_schedules():
-    """Get notification schedules. Filters: ?className=, ?targetDate=, ?status=pending"""
-    class_name = request.args.get('className')
-    target_date = request.args.get('targetDate')
-    status = request.args.get('status')
-
-    conn = data_service.get_db()
-    try:
-        query = 'SELECT * FROM notification_schedules WHERE 1=1'
-        params = []
-        if class_name:
-            query += ' AND class_name = ?'
-            params.append(class_name)
-        if target_date:
-            query += ' AND target_date = ?'
-            params.append(target_date)
-        if status:
-            query += ' AND status = ?'
-            params.append(status)
-        query += ' ORDER BY scheduled_at ASC'
-
-        rows = conn.execute(query, params).fetchall()
-        return jsonify({'schedules': [_format_schedule(r) for r in rows]}), 200
-    finally:
-        conn.close()
-
-
-@notification_bp.route('/schedules', methods=['POST'])
-def create_schedule():
-    """Create a one-time notification schedule.
-    Body: { className, targetDate, studentIds, studentNames, scheduledAt, teacherId, teacherName }
-    scheduledAt is ISO datetime, e.g. '2026-03-23T16:30:00+08:00'
-    """
-    data = request.json or {}
-    class_name = data.get('className')
-    target_date = data.get('targetDate')
-    student_ids = data.get('studentIds', [])
-    student_names = data.get('studentNames', {})
-    scheduled_at = data.get('scheduledAt')
-    teacher_id = data.get('teacherId', '')
-    teacher_name = data.get('teacherName', '')
-
-    if not target_date or not scheduled_at or not student_ids:
-        return jsonify({'error': 'targetDate, scheduledAt, and studentIds are required'}), 400
-
-    now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S+08:00')
-    conn = data_service.get_db()
-    try:
-        # Cancel any existing pending schedule for the same class+date
-        if class_name:
-            conn.execute('''
-                UPDATE notification_schedules SET status = 'cancelled'
-                WHERE class_name = ? AND target_date = ? AND status = 'pending'
-            ''', (class_name, target_date))
-        else:
-            # Individual student schedule — cancel by same studentIds + date
-            conn.execute('''
-                UPDATE notification_schedules SET status = 'cancelled'
-                WHERE target_date = ? AND student_ids = ? AND status = 'pending'
-            ''', (target_date, json.dumps(student_ids, ensure_ascii=False)))
-
-        cursor = conn.execute('''
-            INSERT INTO notification_schedules
-                (class_name, target_date, student_ids, student_names, scheduled_at,
-                 teacher_id, teacher_name, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-        ''', (
-            class_name, target_date,
-            json.dumps(student_ids, ensure_ascii=False),
-            json.dumps(student_names, ensure_ascii=False),
-            scheduled_at, teacher_id, teacher_name, now
-        ))
-        conn.commit()
-        schedule_id = cursor.lastrowid
-
-        # Register one-time APScheduler job
-        _register_onetime_job(schedule_id, scheduled_at)
-
-        return jsonify({
-            'status': 'ok',
-            'id': schedule_id,
-            'scheduledAt': scheduled_at,
-        }), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        conn.close()
-
-
-@notification_bp.route('/schedules/<int:schedule_id>', methods=['DELETE'])
-def cancel_schedule(schedule_id):
-    """Cancel a pending notification schedule."""
-    conn = data_service.get_db()
-    try:
-        row = conn.execute('SELECT * FROM notification_schedules WHERE id = ?', (schedule_id,)).fetchone()
-        if not row:
-            return jsonify({'error': 'Schedule not found'}), 404
-        if row['status'] != 'pending':
-            return jsonify({'error': f'Cannot cancel schedule with status: {row["status"]}'}), 400
-
-        conn.execute(
-            "UPDATE notification_schedules SET status = 'cancelled' WHERE id = ?",
-            (schedule_id,)
-        )
-        conn.commit()
-        _remove_job(schedule_id)
-        return jsonify({'status': 'ok', 'message': 'Schedule cancelled'}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        conn.close()
-
 
 # ==========================================
 # Pre-send Checklist
@@ -706,17 +556,9 @@ def get_checklist(class_name, date):
                 'notifiedAt': row['notified_at'] if row else None,
             })
 
-        # Check if there's a pending schedule
-        schedule_row = conn.execute(
-            "SELECT * FROM notification_schedules WHERE class_name = ? AND target_date = ? AND status = 'pending'",
-            (class_name, date)
-        ).fetchone()
-        pending_schedule = _format_schedule(schedule_row) if schedule_row else None
-
         return jsonify({
             'journal': journal_info,
             'students': students,
-            'pendingSchedule': pending_schedule,
             'filledCount': sum(1 for s in students if s['hasNotes'] or s['hasHealth']),
             'totalCount': len(students),
         }), 200
@@ -727,155 +569,36 @@ def get_checklist(class_name, date):
 
 
 # ==========================================
-# Scheduler Helpers (one-time jobs)
+# Notification Logs
 # ==========================================
 
-_scheduler = None
-
-
-def init_scheduler(scheduler):
-    """Called from app.py to inject the APScheduler instance."""
-    global _scheduler
-    _scheduler = scheduler
-    _load_pending_schedules()
-
-
-def _load_pending_schedules():
-    """On startup: load pending schedules and register APScheduler jobs.
-    If scheduled_at has already passed, execute immediately."""
+@notification_bp.route('/logs/<date>', methods=['GET'])
+def get_notification_logs(date):
+    """Get notification send logs for a given date, grouped by class."""
     conn = None
     try:
         conn = data_service.get_db()
         rows = conn.execute(
-            "SELECT id, scheduled_at FROM notification_schedules WHERE status = 'pending'"
+            'SELECT * FROM notification_logs WHERE date = ? ORDER BY sent_at DESC',
+            (date,)
         ).fetchall()
-        now = datetime.now()
-        loaded = 0
+
+        logs = {}
         for r in rows:
-            try:
-                # Parse scheduled_at
-                sched_str = r['scheduled_at']
-                sched_dt = datetime.fromisoformat(sched_str.replace('+08:00', '+0800') if '+08:00' in sched_str else sched_str)
-                # Make naive for comparison (assume all times are local Asia/Taipei)
-                if sched_dt.tzinfo:
-                    sched_dt = sched_dt.replace(tzinfo=None)
+            cn = r['class_name']
+            if cn not in logs:
+                logs[cn] = []
+            logs[cn].append({
+                'id': r['id'],
+                'studentCount': r['student_count'],
+                'studentIds': json.loads(r['student_ids']) if r['student_ids'] else [],
+                'sentBy': r['sent_by'],
+                'sentAt': r['sent_at'],
+            })
 
-                if sched_dt <= now:
-                    # Past due — execute immediately
-                    print(f'[Scheduler] Schedule {r["id"]} is past due ({sched_str}), executing now')
-                    _run_onetime_notification(r['id'])
-                else:
-                    _register_onetime_job(r['id'], sched_str)
-                    loaded += 1
-            except Exception as e:
-                print(f'[Scheduler] Error loading schedule {r["id"]}: {e}')
-        if loaded:
-            print(f'[Scheduler] Loaded {loaded} pending notification schedule(s)')
-    finally:
-        if conn:
-            conn.close()
-
-
-def _register_onetime_job(schedule_id, scheduled_at_str):
-    """Register a one-time date-trigger job in APScheduler."""
-    if not _scheduler:
-        return
-    job_id = f'notify-schedule-{schedule_id}'
-    try:
-        # Parse ISO datetime
-        dt = datetime.fromisoformat(scheduled_at_str.replace('+08:00', '+0800') if '+08:00' in scheduled_at_str else scheduled_at_str)
-        if dt.tzinfo:
-            dt = dt.replace(tzinfo=None)
-
-        _scheduler.add_job(
-            func=_run_onetime_notification,
-            trigger='date',
-            run_date=dt,
-            id=job_id,
-            replace_existing=True,
-            args=[schedule_id],
-        )
-        print(f'[Scheduler] Registered one-time job {job_id} at {scheduled_at_str}')
+        return jsonify({'date': date, 'logs': logs}), 200
     except Exception as e:
-        print(f'[Scheduler] Failed to register job {job_id}: {e}')
-
-
-def _remove_job(schedule_id):
-    """Remove a job from APScheduler."""
-    if not _scheduler:
-        return
-    job_id = f'notify-schedule-{schedule_id}'
-    try:
-        _scheduler.remove_job(job_id)
-        print(f'[Scheduler] Removed job {job_id}')
-    except Exception:
-        pass
-
-
-def _run_onetime_notification(schedule_id):
-    """Executed by APScheduler at the scheduled time. Sends notifications and marks schedule as executed."""
-    import threading
-
-    print(f'[Scheduler] Running one-time notification for schedule {schedule_id}')
-    conn = None
-    try:
-        conn = data_service.get_db()
-        row = conn.execute(
-            "SELECT * FROM notification_schedules WHERE id = ? AND status = 'pending'",
-            (schedule_id,)
-        ).fetchone()
-        if not row:
-            print(f'[Scheduler] Schedule {schedule_id} not found or already executed/cancelled')
-            return
-
-        class_name = row['class_name']
-        target_date = row['target_date']
-        student_ids = json.loads(row['student_ids']) if row['student_ids'] else []
-        student_names = json.loads(row['student_names']) if row['student_names'] else {}
-
-        if not student_ids:
-            print(f'[Scheduler] Schedule {schedule_id}: no student_ids')
-            return
-
-        # 1. If class-level, publish the class journal
-        if class_name:
-            conn.execute(
-                'UPDATE class_journals SET notified_at = ? WHERE class_name = ? AND date = ? AND notified_at IS NULL',
-                (datetime.now().strftime('%Y-%m-%dT%H:%M:%S+08:00'), class_name, target_date)
-            )
-
-        # 2. Update contact_books: draft → notified
-        now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S+08:00')
-        placeholders = ','.join('?' for _ in student_ids)
-        conn.execute(f'''
-            UPDATE contact_books SET status = 'notified', notified_at = ?
-            WHERE student_id IN ({placeholders}) AND date = ? AND status = 'draft'
-        ''', (now, *student_ids, target_date))
-
-        # 3. Mark schedule as executed
-        conn.execute(
-            "UPDATE notification_schedules SET status = 'executed', executed_at = ? WHERE id = ?",
-            (now, schedule_id)
-        )
-        conn.commit()
-
-        # 4. Send push notifications in background
-        try:
-            from services.send_notification import notify_parents_new_record
-            for sid in student_ids:
-                s_name = student_names.get(sid, sid)
-                def _send(s_id=sid, s_n=s_name):
-                    try:
-                        notify_parents_new_record(data_service, s_id, s_n, target_date)
-                    except Exception as e:
-                        print(f'[Scheduler] Push error for {s_id}: {e}')
-                threading.Thread(target=_send, daemon=True).start()
-        except Exception as e:
-            print(f'[Scheduler] Notification service unavailable: {e}')
-
-        print(f'[Scheduler] Executed schedule {schedule_id}: {len(student_ids)} students notified for {target_date}')
-    except Exception as e:
-        print(f'[Scheduler] Error executing schedule {schedule_id}: {e}')
+        return jsonify({'error': str(e)}), 500
     finally:
         if conn:
             conn.close()

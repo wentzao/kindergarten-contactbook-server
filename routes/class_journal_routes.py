@@ -57,25 +57,32 @@ def publish_journal(class_name, date):
     data = request.get_json() or {}
     student_ids = data.get('studentIds', [])
     student_names = data.get('studentNames', {})
+    sent_by = data.get('sentBy')
 
     # 1. Mark class journal as published
     data_service.publish_class_journal(class_name, date)
 
-    # 2. Batch update contact_books: draft → notified
+    # 2. Batch update contact_books: draft → notified + record log
+    now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S+08:00')
     conn = data_service.get_db()
     try:
         if student_ids:
-            now = datetime.now().isoformat()
             placeholders = ','.join(['?'] * len(student_ids))
             conn.execute(f'''
                 UPDATE contact_books SET status = 'notified', notified_at = ?
                 WHERE student_id IN ({placeholders}) AND date = ? AND status = 'draft'
             ''', (now, *student_ids, date))
-            conn.commit()
+
+        # Record notification log
+        conn.execute('''
+            INSERT INTO notification_logs (class_name, date, student_count, student_ids, sent_by, sent_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (class_name, date, len(student_ids), json.dumps(student_ids), sent_by, now))
+        conn.commit()
     finally:
         conn.close()
 
-    # 3. Send push notifications in background (reuse existing logic)
+    # 3. Send push notifications in background
     notified_count = 0
     if student_ids:
         def _send_notifications():
@@ -86,24 +93,11 @@ def publish_journal(class_name, date):
                     notify_parents_new_record(data_service, sid, s_name, date)
                 except Exception as e:
                     print(f"[publish] notify error for {sid}: {e}")
-            # Mark notified_at on contact_books
-            conn2 = data_service.get_db()
-            try:
-                from datetime import datetime
-                now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S+08:00')
-                placeholders2 = ','.join(['?'] * len(student_ids))
-                conn2.execute(f'''
-                    UPDATE contact_books SET notified_at = ?
-                    WHERE student_id IN ({placeholders2}) AND date = ? AND notified_at IS NULL
-                ''', (now, *student_ids, date))
-                conn2.commit()
-            finally:
-                conn2.close()
 
         threading.Thread(target=_send_notifications, daemon=True).start()
         notified_count = len(student_ids)
 
-    return jsonify({'published': True, 'notifiedCount': notified_count})
+    return jsonify({'published': True, 'notifiedCount': notified_count, 'sentAt': now})
 
 
 @journal_bp.route('/student/<student_id>/<date>', methods=['GET'])
