@@ -315,8 +315,8 @@ def get_unread_comments(teacher_id):
             # Count parent comments newer than last_read
             unread = sum(
                 1 for c in comments
-                if c.get('senderId', 'parent') == 'parent'
-                and c.get('createdAt', '') > last_read
+                if c.get('senderRole', '') == 'parent' or c.get('senderId') == 'parent'
+                if c.get('createdAt', '') > last_read
             )
 
             if unread > 0:
