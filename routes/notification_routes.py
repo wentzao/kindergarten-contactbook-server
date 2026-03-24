@@ -572,16 +572,36 @@ def get_checklist(class_name, date):
 # Notification Logs
 # ==========================================
 
-@notification_bp.route('/logs/<date>', methods=['GET'])
-def get_notification_logs(date):
-    """Get notification send logs for a given date, grouped by class."""
+@notification_bp.route('/logs', methods=['GET'])
+def get_notification_logs():
+    """Get notification send logs. Supports ?date= (single day) or ?className= (all history for class)."""
+    date = request.args.get('date')
+    class_name = request.args.get('className')
+    limit = int(request.args.get('limit', 50))
+
     conn = None
     try:
         conn = data_service.get_db()
-        rows = conn.execute(
-            'SELECT * FROM notification_logs WHERE date = ? ORDER BY sent_at DESC',
-            (date,)
-        ).fetchall()
+
+        # Build query
+        conditions = []
+        params = []
+        if date:
+            conditions.append('n.date = ?')
+            params.append(date)
+        if class_name:
+            conditions.append('n.class_name = ?')
+            params.append(class_name)
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ''
+        rows = conn.execute(f'''
+            SELECT n.*, t.cname, t.ename
+            FROM notification_logs n
+            LEFT JOIN teacher_profiles t ON n.sent_by = t.user_id
+            {where}
+            ORDER BY n.sent_at DESC
+            LIMIT ?
+        ''', (*params, limit)).fetchall()
 
         logs = {}
         for r in rows:
@@ -590,13 +610,15 @@ def get_notification_logs(date):
                 logs[cn] = []
             logs[cn].append({
                 'id': r['id'],
+                'date': r['date'],
                 'studentCount': r['student_count'],
                 'studentIds': json.loads(r['student_ids']) if r['student_ids'] else [],
                 'sentBy': r['sent_by'],
+                'sentByName': r['cname'] or r['ename'] or r['sent_by'] or '',
                 'sentAt': r['sent_at'],
             })
 
-        return jsonify({'date': date, 'logs': logs}), 200
+        return jsonify({'logs': logs}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
