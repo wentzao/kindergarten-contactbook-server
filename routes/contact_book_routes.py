@@ -550,6 +550,7 @@ def batch_save_teacher(class_name, date):
 
     students_data = body['students']
     edited_by_raw = body.get('editedBy')
+    last_known_modified = body.get('lastModified', {})  # { studentId: "ISO timestamp" }
     edited_by = None
     if edited_by_raw:
         edited_by = json.dumps({
@@ -561,7 +562,22 @@ def batch_save_teacher(class_name, date):
     conn = data_service.get_db()
     try:
         saved_count = 0
+        conflicts = {}
         for student_id, note_data in students_data.items():
+            # Optimistic lock: check per-student lastModified
+            known = last_known_modified.get(student_id)
+            if known:
+                row_check = conn.execute(
+                    'SELECT last_modified, edited_by FROM contact_books WHERE student_id = ? AND date = ?',
+                    (student_id, date)
+                ).fetchone()
+                if row_check and row_check['last_modified'] and row_check['last_modified'] != known:
+                    conflicts[student_id] = {
+                        'serverModified': row_check['last_modified'],
+                        'editedBy': json.loads(row_check['edited_by']) if row_check['edited_by'] else None,
+                    }
+                    continue  # Skip this student, don't overwrite
+
             # Extract fields that have their own DB columns
             raw_items = note_data.pop('itemsToBring', None)
             if raw_items and isinstance(raw_items, list) and len(raw_items) > 0:
@@ -603,7 +619,30 @@ def batch_save_teacher(class_name, date):
             saved_count += 1
 
         conn.commit()
-        return jsonify({'status': 'saved', 'count': saved_count}), 200
+
+        # Send silent "data_updated" notification for student notes
+        if saved_count > 0:
+            saved_ids = [sid for sid in students_data.keys() if sid not in conflicts]
+            def _notify():
+                try:
+                    from services.send_notification import send_to_role
+                    notify_data = {
+                        'type': 'data_updated',
+                        'dataType': 'student_notes',
+                        'className': class_name,
+                        'date': date,
+                        'studentIds': json.dumps(saved_ids),
+                    }
+                    send_to_role(data_service, 'teacher', '', '', notify_data)
+                    send_to_role(data_service, 'admin', '', '', notify_data)
+                except Exception as e:
+                    print(f'[ContactBook] data_updated notification error: {e}')
+            threading.Thread(target=_notify, daemon=True).start()
+
+        result = {'status': 'saved', 'count': saved_count}
+        if conflicts:
+            result['conflicts'] = conflicts
+        return jsonify(result), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:

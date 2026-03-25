@@ -28,17 +28,50 @@ def get_journal(class_name, date):
 
 @journal_bp.route('/<class_name>/<date>', methods=['PUT'])
 def save_journal(class_name, date):
-    """Save/update class journal content blocks (auto-save)."""
+    """Save/update class journal content blocks (auto-save).
+    Supports optimistic locking: if lastUpdatedAt is provided, rejects save if server version is newer.
+    """
     data = request.get_json()
     if not data:
         return jsonify({'error': 'No data provided'}), 400
 
     content_blocks = data.get('contentBlocks', [])
     edited_by = data.get('editedBy')
+    last_updated_at = data.get('lastUpdatedAt')
+
+    # Optimistic lock: check if someone else saved a newer version
+    if last_updated_at:
+        existing = data_service.get_class_journal(class_name, date)
+        if existing and existing.get('updatedAt') and existing['updatedAt'] != last_updated_at:
+            return jsonify({
+                'error': 'conflict',
+                'message': '此日誌已被其他老師更新',
+                'serverUpdatedAt': existing['updatedAt'],
+                'editedBy': existing.get('editedBy'),
+            }), 409
 
     result = data_service.save_class_journal(
         class_name, date, content_blocks, edited_by
     )
+
+    # Send silent "data_updated" notification to other teachers
+    def _notify_update():
+        try:
+            from services.send_notification import send_to_role
+            notify_data = {
+                'type': 'data_updated',
+                'dataType': 'class_journal',
+                'className': class_name,
+                'date': date,
+                'updatedAt': result.get('updatedAt', ''),
+            }
+            send_to_role(data_service, 'teacher', '', '', notify_data)
+            send_to_role(data_service, 'admin', '', '', notify_data)
+        except Exception as e:
+            print(f'[Journal] data_updated notification error: {e}')
+
+    threading.Thread(target=_notify_update, daemon=True).start()
+
     return jsonify(result)
 
 
