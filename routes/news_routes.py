@@ -4,6 +4,7 @@ from services.data_service import DataService
 import os
 import json
 import threading
+import random
 
 news_bp = Blueprint('news', __name__)
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
@@ -14,13 +15,31 @@ def load_json(val):
     try: return json.loads(val)
     except: return None
 
+def _gen_block_id():
+    import time
+    ts = int(time.time() * 1000)
+    rand = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=5))
+    return f'blk_{ts}_{rand}'
+
+def _normalize_blocks(blocks):
+    """Ensure every block has an id. Migrates legacy blocks on-the-fly."""
+    if not blocks:
+        return blocks
+    result = []
+    for b in blocks:
+        if 'id' not in b:
+            b = dict(b)
+            b['id'] = _gen_block_id()
+        result.append(b)
+    return result
+
 def format_news(r):
     return {
         'id': r['id'],
         'title': r['title'],
         'tag': r['tag'],
         'coverImage': r['cover_image'],
-        'contentBlocks': load_json(r['content_blocks']) or [],
+        'contentBlocks': _normalize_blocks(load_json(r['content_blocks']) or []),
         'author': r['author'],
         'isPinned': bool(r['is_pinned']),
         'publishAt': r['publish_at'],
@@ -42,11 +61,15 @@ def list_news():
     conn = data_service.get_db()
     try:
         now = datetime.now().isoformat()
-        
-        # Build query
-        query = "SELECT * FROM news WHERE status = ?"
-        params = [status_filter]
-        
+
+        # Build query — 'all' means no status filter (admin/teacher view)
+        if status_filter == 'all':
+            query = "SELECT * FROM news"
+            params = []
+        else:
+            query = "SELECT * FROM news WHERE status = ?"
+            params = [status_filter]
+
         # Execute query first, then filter targetClasses manually (simplest way since it's JSON array in sqlite)
         rows = conn.execute(query, params).fetchall()
         filtered = []
