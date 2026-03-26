@@ -10,6 +10,19 @@ news_bp = Blueprint('news', __name__)
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 data_service = DataService(DATA_DIR)
 
+def _migrate():
+    """Auto-add columns added after initial schema."""
+    conn = data_service.get_db()
+    try:
+        cols = [r[1] for r in conn.execute('PRAGMA table_info(news)').fetchall()]
+        if 'ref_no' not in cols:
+            conn.execute('ALTER TABLE news ADD COLUMN ref_no VARCHAR(50)')
+            conn.commit()
+    finally:
+        conn.close()
+
+_migrate()
+
 def load_json(val):
     if not val: return None
     try: return json.loads(val)
@@ -34,6 +47,7 @@ def _normalize_blocks(blocks):
     return result
 
 def format_news(r):
+    keys = r.keys()
     return {
         'id': r['id'],
         'title': r['title'],
@@ -48,7 +62,8 @@ def format_news(r):
         'createdBy': r['created_by'],
         'surveyId': r['survey_id'],
         'targetClasses': load_json(r['target_classes']) or [],
-        'status': r['status']
+        'status': r['status'],
+        'refNo': r['ref_no'] if 'ref_no' in keys else None,
     }
 
 @news_bp.route('/', methods=['GET'])
@@ -123,7 +138,9 @@ def list_news():
                 'author': item.get('author'),
                 'isPinned': item.get('isPinned', False),
                 'publishAt': item.get('publishAt'),
-                'surveyId': item.get('surveyId')
+                'surveyId': item.get('surveyId'),
+                'status': item.get('status'),
+                'refNo': item.get('refNo'),
             })
             
         return jsonify({
@@ -166,15 +183,15 @@ def create_news():
             INSERT INTO news (
                 id, title, tag, cover_image, content_blocks, author,
                 is_pinned, publish_at, created_at, updated_at, created_by,
-                survey_id, target_classes, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                survey_id, target_classes, status, ref_no
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             news_id, data.get('title'), data.get('tag', '一般公告'), data.get('coverImage'),
             json.dumps(data.get('contentBlocks', []), ensure_ascii=False), data.get('author'),
             1 if data.get('isPinned') else 0, data.get('publishAt', now.isoformat()),
             now.isoformat(), now.isoformat(), data.get('createdBy', 'admin'),
             data.get('surveyId'), json.dumps(data.get('targetClasses', []), ensure_ascii=False),
-            data.get('status', 'published')
+            data.get('status', 'published'), data.get('refNo')
         ))
         conn.commit()
         
@@ -207,8 +224,8 @@ def update_news(news_id):
             
         news = format_news(r)
         
-        updatable = ['title', 'tag', 'coverImage', 'contentBlocks', 'author', 
-                     'isPinned', 'publishAt', 'surveyId', 'targetClasses', 'status']
+        updatable = ['title', 'tag', 'coverImage', 'contentBlocks', 'author',
+                     'isPinned', 'publishAt', 'surveyId', 'targetClasses', 'status', 'refNo']
         for field in updatable:
             if field in data:
                 news[field] = data[field]
@@ -217,13 +234,13 @@ def update_news(news_id):
 
         conn.execute('''
             UPDATE news SET title=?, tag=?, cover_image=?, content_blocks=?, author=?,
-            is_pinned=?, publish_at=?, survey_id=?, target_classes=?, status=?, updated_at=?
+            is_pinned=?, publish_at=?, survey_id=?, target_classes=?, status=?, updated_at=?, ref_no=?
             WHERE id=?
         ''', (
             news['title'], news['tag'], news['coverImage'], json.dumps(news['contentBlocks'], ensure_ascii=False),
             news['author'], 1 if news['isPinned'] else 0, news['publishAt'], news['surveyId'],
             json.dumps(news['targetClasses'], ensure_ascii=False), news['status'], datetime.now().isoformat(),
-            news_id
+            news.get('refNo'), news_id
         ))
         conn.commit()
 
