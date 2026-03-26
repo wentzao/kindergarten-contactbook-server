@@ -451,50 +451,52 @@ def send_batch_notifications():
         conn = data_service.get_db()
         placeholders = ','.join('?' for _ in student_ids)
 
-        # Find draft entries to promote to notified
-        query = f'''
-            SELECT student_id, date FROM contact_books
-            WHERE student_id IN ({placeholders})
-            AND status = 'draft'
-        '''
-        params = list(student_ids)
-        if date_filter:
-            query += ' AND date = ?'
-            params.append(date_filter)
-
-        rows = conn.execute(query, params).fetchall()
-        if not rows:
-            return jsonify({'sent': 0, 'total': 0, 'message': 'No draft entries to notify'}), 200
-
         now = datetime.now().isoformat()
         sent_count = 0
+        student_names = data.get('studentNames', {})
+        target_date = date_filter
 
         try:
             from services.send_notification import notify_parents_new_record
         except Exception:
             return jsonify({'error': 'Notification service unavailable'}), 500
 
-        for row in rows:
-            sid = row['student_id']
-            d = row['date']
-            student_name = data.get('studentNames', {}).get(sid, sid)
+        for sid in student_ids:
+            if not target_date:
+                continue
+            row = conn.execute(
+                'SELECT id, status FROM contact_books WHERE student_id = ? AND date = ?',
+                (sid, target_date)
+            ).fetchone()
 
-            def _send(s_id=sid, s_name=student_name, s_date=d):
+            if row and row['status'] in ('notified', 'read', 'signed'):
+                continue  # Already notified, skip
+
+            if not row:
+                # No record yet — create a minimal notified entry
+                year, month = int(target_date.split('-')[0]), int(target_date.split('-')[1])
+                conn.execute('''
+                    INSERT INTO contact_books (student_id, date, year, month, status, notified_at)
+                    VALUES (?, ?, ?, ?, 'notified', ?)
+                ''', (sid, target_date, year, month, now))
+            else:
+                # draft → notified
+                conn.execute(
+                    'UPDATE contact_books SET status = ?, notified_at = ? WHERE id = ?',
+                    ('notified', now, row['id'])
+                )
+
+            student_name = student_names.get(sid, sid)
+            def _send(s_id=sid, s_name=student_name, s_date=target_date):
                 try:
                     notify_parents_new_record(data_service, s_id, s_name, s_date)
                 except Exception as e:
                     print(f'[Notification] Batch send error for {s_id}: {e}')
             threading.Thread(target=_send, daemon=True).start()
-
-            # draft → notified
-            conn.execute(
-                'UPDATE contact_books SET status = ?, notified_at = ? WHERE student_id = ? AND date = ?',
-                ('notified', now, sid, d)
-            )
             sent_count += 1
 
         conn.commit()
-        return jsonify({'sent': sent_count, 'total': len(rows)}), 200
+        return jsonify({'sent': sent_count, 'total': len(student_ids)}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:

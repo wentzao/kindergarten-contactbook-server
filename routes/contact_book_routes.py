@@ -107,14 +107,16 @@ def format_record(r, version='original', teacher_profiles=None):
 
     status = r['status']
 
-    # Resolve editedBy userId → cname/ename
+    # Resolve editedBy userId → cname/ename (cache overrides stored names if available)
     edited_by_raw = load_json(r['edited_by'])
     if edited_by_raw and teacher_profiles:
         uid = edited_by_raw.get('userId', '')
         resolved = _resolve_teacher_name(uid, teacher_profiles)
         if resolved:
-            edited_by_raw['cname'] = resolved['cname']
-            edited_by_raw['ename'] = resolved['ename']
+            if resolved['cname']:
+                edited_by_raw['cname'] = resolved['cname']
+            if resolved['ename']:
+                edited_by_raw['ename'] = resolved['ename']
 
     # Resolve comment sender names
     comments = load_json(r['comments']) or []
@@ -182,20 +184,35 @@ def get_contact_book(student_id, year, month):
         records = [format_record(r, version, profiles) for r in rows]
 
         # Embed class journal blocks if className is provided
+        # Only show journal for dates where THIS STUDENT has been notified (per-student check)
         if class_name:
             journal_map = {}
             journal_rows = conn.execute(
-                'SELECT date, content_blocks, updated_at, notified_at FROM class_journals WHERE class_name = ? AND date LIKE ?',
+                'SELECT date, content_blocks, edited_by, updated_at FROM class_journals WHERE class_name = ? AND date LIKE ?',
                 (class_name, f'{year}-{month:02d}-%')
             ).fetchall()
             for jr in journal_rows:
-                if jr['notified_at']:  # Only include published journals
-                    journal_map[jr['date']] = {
-                        'contentBlocks': load_json(jr['content_blocks']) or [],
-                        'updatedAt': jr['updated_at'],
-                    }
+                j_edited_by = load_json(jr['edited_by'])
+                # Enrich journal editedBy from teacher_profiles cache
+                if j_edited_by and profiles:
+                    uid = j_edited_by.get('userId', '')
+                    resolved = _resolve_teacher_name(uid, profiles)
+                    if resolved:
+                        if resolved['cname']:
+                            j_edited_by['cname'] = resolved['cname']
+                        if resolved['ename']:
+                            j_edited_by['ename'] = resolved['ename']
+                journal_map[jr['date']] = {
+                    'contentBlocks': load_json(jr['content_blocks']) or [],
+                    'editedBy': j_edited_by,
+                    'updatedAt': jr['updated_at'],
+                }
             for rec in records:
-                rec['classJournal'] = journal_map.get(rec['date'])
+                # Only include journal if student's status is notified/read/signed
+                if rec.get('status') in ('notified', 'read', 'signed') and rec['date'] in journal_map:
+                    rec['classJournal'] = journal_map[rec['date']]
+                else:
+                    rec['classJournal'] = None
 
         data = {
             'studentId': student_id,
@@ -555,6 +572,8 @@ def batch_save_teacher(class_name, date):
     if edited_by_raw:
         edited_by = json.dumps({
             'userId': edited_by_raw.get('userId', ''),
+            'cname': edited_by_raw.get('cname', ''),
+            'ename': edited_by_raw.get('ename', ''),
             'editedAt': datetime.now().isoformat(),
         }, ensure_ascii=False)
 

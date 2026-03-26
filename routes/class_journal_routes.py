@@ -95,16 +95,27 @@ def publish_journal(class_name, date):
     # 1. Mark class journal as published
     data_service.publish_class_journal(class_name, date)
 
-    # 2. Batch update contact_books: draft → notified + record log
+    # 2. Batch UPSERT contact_books: create if missing, upgrade draft → notified
     now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S+08:00')
+    year, month = int(date.split('-')[0]), int(date.split('-')[1])
     conn = data_service.get_db()
     try:
-        if student_ids:
-            placeholders = ','.join(['?'] * len(student_ids))
-            conn.execute(f'''
-                UPDATE contact_books SET status = 'notified', notified_at = ?
-                WHERE student_id IN ({placeholders}) AND date = ? AND status = 'draft'
-            ''', (now, *student_ids, date))
+        for sid in student_ids:
+            row = conn.execute(
+                'SELECT id, status FROM contact_books WHERE student_id = ? AND date = ?',
+                (sid, date)
+            ).fetchone()
+            if not row:
+                # No record yet — create a minimal notified entry
+                conn.execute('''
+                    INSERT INTO contact_books (student_id, date, year, month, status, notified_at)
+                    VALUES (?, ?, ?, ?, 'notified', ?)
+                ''', (sid, date, year, month, now))
+            elif row['status'] == 'draft':
+                conn.execute(
+                    'UPDATE contact_books SET status = ?, notified_at = ? WHERE id = ?',
+                    ('notified', now, row['id'])
+                )
 
         # Record notification log
         conn.execute('''
@@ -136,14 +147,25 @@ def publish_journal(class_name, date):
 @journal_bp.route('/student/<student_id>/<date>', methods=['GET'])
 def get_journal_for_student(student_id, date):
     """Parent-facing: get class journal for a student on a date.
-    Only returns data if journal has been published (notified_at IS NOT NULL).
+    Only returns data if the STUDENT has been notified (per-student contact_books.status).
     Requires ?className= query param."""
     class_name = request.args.get('className')
     if not class_name:
         return jsonify({'error': 'className query param required'}), 400
 
+    # Check per-student notification status (not class-level)
+    conn = data_service.get_db()
+    try:
+        row = conn.execute(
+            'SELECT status FROM contact_books WHERE student_id = ? AND date = ?',
+            (student_id, date)
+        ).fetchone()
+    finally:
+        conn.close()
+    student_notified = row and row['status'] in ('notified', 'read', 'signed')
+
     journal = data_service.get_class_journal(class_name, date)
-    if not journal or not journal.get('notifiedAt'):
+    if not journal or not student_notified:
         return jsonify({
             'date': date,
             'classJournal': None,
@@ -153,6 +175,7 @@ def get_journal_for_student(student_id, date):
         'date': date,
         'classJournal': {
             'contentBlocks': journal.get('contentBlocks', []),
+            'editedBy': journal.get('editedBy'),
             'updatedAt': journal.get('updatedAt'),
         },
     })
