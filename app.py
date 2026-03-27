@@ -9,7 +9,7 @@ from datetime import datetime
 app = Flask(__name__)
 # Enable CORS for all routes
 CORS(app, resources={r"/api/*": {
-    "origins": ["https://teacher-contact-book.wentzao.com", "https://newsroom.wentzao.com", "http://localhost:5173", "http://localhost:4173"],
+    "origins": ["https://teacher-contact-book.wentzao.com", "https://newsroom.wentzao.com", "http://localhost:5173", "http://localhost:4173", "http://localhost:5500", "http://127.0.0.1:5500"],
     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     "allow_headers": ["Content-Type", "Authorization"],
     "supports_credentials": True
