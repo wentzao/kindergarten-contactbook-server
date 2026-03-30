@@ -21,6 +21,8 @@ def _migrate():
             conn.execute('ALTER TABLE news ADD COLUMN first_published_at VARCHAR(50)')
         if 'pending_draft' not in cols:
             conn.execute('ALTER TABLE news ADD COLUMN pending_draft TEXT')
+        if 'pin_order' not in cols:
+            conn.execute('ALTER TABLE news ADD COLUMN pin_order INTEGER')
         conn.commit()
     finally:
         conn.close()
@@ -73,6 +75,7 @@ def format_news(r):
         'firstPublishedAt': r['first_published_at'] if 'first_published_at' in keys else None,
         'pendingDraft': pending_draft,
         'hasDraft': pending_draft is not None,
+        'pinOrder': r['pin_order'] if 'pin_order' in keys else None,
     }
 
 @news_bp.route('/', methods=['GET'])
@@ -109,9 +112,10 @@ def list_news():
 
             filtered.append(format_news(r))
 
-        # Sort: pinned first, then by publishAt descending
+        # Sort: pinned first by pin_order ASC (None last), then non-pinned by publishAt DESC
         pinned = [x for x in filtered if x.get('isPinned')]
         non_pinned = [x for x in filtered if not x.get('isPinned')]
+        pinned.sort(key=lambda x: (x.get('pinOrder') is None, x.get('pinOrder') or 0))
         non_pinned.sort(key=lambda x: x.get('publishAt', ''), reverse=True)
         filtered = pinned + non_pinned
 
@@ -147,6 +151,7 @@ def list_news():
                 'firstPublishedAt': item.get('firstPublishedAt'),
                 'updatedAt': item.get('updatedAt'),
                 'hasDraft': item.get('hasDraft', False),
+                'pinOrder': item.get('pinOrder'),
             })
 
         return jsonify({
@@ -252,11 +257,33 @@ def update_news(news_id):
         # All other cases: apply changes to main columns.
         news = format_news(r)
 
+        old_pinned = bool(r['is_pinned'])
         updatable = ['title', 'tag', 'coverImage', 'contentBlocks', 'author',
                      'isPinned', 'publishAt', 'surveyId', 'targetClasses', 'status', 'refNo']
         for field in updatable:
             if field in data:
                 news[field] = data[field]
+
+        new_pinned = bool(news['isPinned'])
+
+        # Determine pin_order value
+        current_pin_order = r['pin_order'] if 'pin_order' in keys else None
+        if 'pinOrder' in data:
+            # Explicit reorder from teacher web (↑↓ buttons) — just use the provided value
+            pin_order_val = data['pinOrder']
+        elif new_pinned and not old_pinned:
+            # Newly pinned: bump all other pinned articles, place this one at top (0)
+            conn.execute(
+                'UPDATE news SET pin_order = pin_order + 1 WHERE is_pinned = 1 AND id != ?',
+                (news_id,)
+            )
+            pin_order_val = 0
+        elif not new_pinned:
+            # Unpinned: clear pin_order
+            pin_order_val = None
+        else:
+            # No change to pinned state — keep existing pin_order
+            pin_order_val = current_pin_order
 
         # Set first_published_at on first publish
         current_first_pub = r['first_published_at'] if 'first_published_at' in keys else None
@@ -272,13 +299,13 @@ def update_news(news_id):
         conn.execute('''
             UPDATE news SET title=?, tag=?, cover_image=?, content_blocks=?, author=?,
             is_pinned=?, publish_at=?, survey_id=?, target_classes=?, status=?, updated_at=?, ref_no=?,
-            first_published_at=?, pending_draft=?
+            first_published_at=?, pending_draft=?, pin_order=?
             WHERE id=?
         ''', (
             news['title'], news['tag'], news['coverImage'], json.dumps(news['contentBlocks'], ensure_ascii=False),
             news['author'], 1 if news['isPinned'] else 0, news['publishAt'], news['surveyId'],
             json.dumps(news['targetClasses'], ensure_ascii=False), news['status'], now.isoformat(),
-            news.get('refNo'), new_first_pub, pending_draft_val, news_id
+            news.get('refNo'), new_first_pub, pending_draft_val, pin_order_val, news_id
         ))
         conn.commit()
 
