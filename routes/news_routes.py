@@ -302,49 +302,29 @@ def delete_news(news_id):
 
 @news_bp.route('/<news_id>/notify', methods=['POST'])
 def notify_news(news_id):
-    """Send full push notification for a news item (first publish)."""
+    """Send push notification for a news item.
+    Optional JSON body: { "body": "custom notification body text" }
+    """
     conn = data_service.get_db()
     try:
         r = conn.execute('SELECT * FROM news WHERE id = ?', (news_id,)).fetchone()
         if not r:
             return jsonify({'error': 'News not found'}), 404
-        _notify_announcement_bg(news_id, r['title'])
+        body_text = ''
+        if request.is_json and request.json:
+            body_text = request.json.get('body', '')
+        _notify_announcement_bg(news_id, r['title'], body_text)
         return jsonify({'status': 'queued'})
     finally:
         conn.close()
 
 
-@news_bp.route('/<news_id>/notify-update', methods=['POST'])
-def notify_news_update(news_id):
-    """Send silent cache-refresh notification for an updated news item."""
-    conn = data_service.get_db()
-    try:
-        r = conn.execute('SELECT * FROM news WHERE id = ?', (news_id,)).fetchone()
-        if not r:
-            return jsonify({'error': 'News not found'}), 404
-        _notify_update_bg(news_id)
-        return jsonify({'status': 'queued'})
-    finally:
-        conn.close()
-
-
-def _notify_announcement_bg(news_id, title_text):
+def _notify_announcement_bg(news_id, title_text, body_text=''):
     """Send announcement notification to all parents in a background thread."""
     def _send():
         try:
             from services.send_notification import notify_parents_announcement
-            notify_parents_announcement(data_service, news_id, title_text, '')
+            notify_parents_announcement(data_service, news_id, title_text, body_text)
         except Exception as e:
             print(f'[Notification] Error sending announcement notification: {e}')
-    threading.Thread(target=_send, daemon=True).start()
-
-
-def _notify_update_bg(news_id):
-    """Send silent announcement-update notification in a background thread."""
-    def _send():
-        try:
-            from services.send_notification import notify_parents_announcement_update
-            notify_parents_announcement_update(data_service, news_id)
-        except Exception as e:
-            print(f'[Notification] Error sending announcement update notification: {e}')
     threading.Thread(target=_send, daemon=True).start()
