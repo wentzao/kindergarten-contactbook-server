@@ -85,7 +85,9 @@ CREATE TABLE news (
     created_by VARCHAR(100),
     survey_id VARCHAR(50),
     target_classes TEXT,
-    status VARCHAR(50)
+    status VARCHAR(50),
+    first_published_at VARCHAR(50),
+    pending_draft TEXT
 );
 
 DROP TABLE IF EXISTS surveys;

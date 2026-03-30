@@ -384,6 +384,40 @@ def notify_parents_announcement(data_service, news_id, title_text, body_text='')
         conn.close()
 
 
+def notify_parents_announcement_update(data_service, news_id):
+    """Silent data-only push so the app can refresh its announcement cache.
+
+    No notification banner is shown — this is a background cache-invalidation signal.
+    Respects the announcement_notify preference so opted-out users are still excluded.
+    """
+    ndata = {
+        'type': 'announcement_update',
+        'id': str(news_id),
+    }
+
+    conn = data_service.get_db()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT push_token, user_id FROM push_tokens WHERE role = 'parent'"
+        ).fetchall()
+
+        pref_rows = conn.execute(
+            "SELECT user_id FROM notification_preferences WHERE announcement_notify = 0"
+        ).fetchall()
+        opted_out = {r['user_id'] for r in pref_rows}
+
+        tokens = [r['push_token'] for r in rows if r['user_id'] not in opted_out]
+
+        if tokens:
+            count = send_to_tokens(tokens, '', '', ndata)
+            if count > 0:
+                print(f'[FCM] Sent silent update notification to {count} parent devices')
+            return count
+        return 0
+    finally:
+        conn.close()
+
+
 def notify_teachers_status_update(data_service, student_id, student_name, date, new_status):
     """Silent data-only push so teacher web can instantly update contact book status.
     
