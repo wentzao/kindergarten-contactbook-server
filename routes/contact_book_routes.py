@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
+from urllib.parse import unquote
 import json
 import threading
 from services.data_service import DataService
@@ -61,6 +62,15 @@ def _get_parent_comment_notifier():
         return notify_parents_new_comment
     except Exception as e:
         print(f'[Notification] Failed to import parent comment notifier: {e}')
+        return None
+
+
+def _get_comment_deleted_notifier():
+    try:
+        from services.send_notification import notify_teachers_comment_deleted
+        return notify_teachers_comment_deleted
+    except Exception as e:
+        print(f'[Notification] Failed to import comment-deleted notifier: {e}')
         return None
 
 # Helper to deserialize json fields safely
@@ -517,6 +527,8 @@ def delete_comment(student_id, date, comment_id):
       3. comment['createdAt'] == comment_id  (legacy fallback by timestamp)
     Returns 200 on success, 404 if the record or comment is not found.
     """
+    # Decode percent-encoding (e.g. %2F → /) for URL-as-id fallback
+    comment_id = unquote(comment_id)
     conn = data_service.get_db()
     try:
         row = conn.execute(
@@ -547,6 +559,14 @@ def delete_comment(student_id, date, comment_id):
             (json.dumps(filtered, ensure_ascii=False), datetime.now().isoformat(), student_id, date)
         )
         conn.commit()
+
+        # Silently notify teachers so their chat view refreshes in real-time
+        def _send_bg():
+            notify = _get_comment_deleted_notifier()
+            if notify:
+                notify(data_service, student_id, date)
+        threading.Thread(target=_send_bg, daemon=True).start()
+
         return jsonify({'status': 'deleted', 'remaining': len(filtered)}), 200
 
     except Exception as e:

@@ -280,7 +280,8 @@ def notify_teachers_new_comment(data_service, student_id, student_name, sender_n
     is_image = (
         isinstance(content, str) and (
             content.startswith('https://firebasestorage.googleapis.com') or
-            content.startswith('https://storage.googleapis.com')
+            content.startswith('https://storage.googleapis.com') or
+            content.startswith('https://imageserver.wentzao.com')
         )
     )
     content_preview = '傳了一張照片 📷' if is_image else content[:100]
@@ -331,7 +332,8 @@ def notify_parents_new_comment(data_service, student_id, student_name, sender_na
     is_image = (
         isinstance(content, str) and (
             content.startswith('https://firebasestorage.googleapis.com') or
-            content.startswith('https://storage.googleapis.com')
+            content.startswith('https://storage.googleapis.com') or
+            content.startswith('https://imageserver.wentzao.com')
         )
     )
     content_preview = '傳了一張照片 📷' if is_image else content[:100]
@@ -439,4 +441,22 @@ def notify_teachers_status_update(data_service, student_id, student_name, date, 
 
     if count > 0:
         print(f'[FCM] Sent status update ({new_status}) for {student_name} to {count} devices')
+    return count
+
+
+def notify_teachers_comment_deleted(data_service, student_id, date):
+    """Silent data-only push so the teacher web can remove a deleted parent image from the chat.
+
+    No notification banner is shown — teachers' ContactBook page listens for
+    'contact_book_comment_deleted' and invalidates its React Query cache.
+    """
+    data = {
+        'type': 'contact_book_comment_deleted',
+        'studentId': str(student_id),
+        'date': str(date),
+    }
+    count = send_to_role(data_service, 'teacher', '', '', data)
+    count += send_to_role(data_service, 'admin', '', '', data)
+    if count > 0:
+        print(f'[FCM] Sent comment-deleted notification to {count} devices')
     return count
