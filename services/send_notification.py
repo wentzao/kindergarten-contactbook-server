@@ -444,19 +444,43 @@ def notify_teachers_status_update(data_service, student_id, student_name, date, 
     return count
 
 
-def notify_teachers_comment_deleted(data_service, student_id, date):
-    """Silent data-only push so the teacher web can remove a deleted parent image from the chat.
+def notify_teachers_comment_deleted(data_service, student_id, date, image_url='', sender_name='家長'):
+    """Visible push notification to teachers/admins when a parent deletes a chat photo.
 
-    No notification banner is shown — teachers' ContactBook page listens for
-    'contact_book_comment_deleted' and invalidates its React Query cache.
+    Shows an OS-level notification banner when the PWA is in background, and
+    an in-app toast (not "新訊息") when the PWA is in foreground.
+    Does NOT trigger the unread-comments badge.
+    image_url is included so the teacher web can evict the specific URL from IndexedDB.
+    """
+    body = f'{sender_name} 刪除了 {date} 的一張照片'
+    data = {
+        'type': 'contact_book_comment_deleted',
+        'studentId': str(student_id),
+        'date': str(date),
+        'imageUrl': str(image_url),
+        'senderName': str(sender_name),
+    }
+    count = send_to_role(data_service, 'teacher', '照片已刪除', body, data)
+    count += send_to_role(data_service, 'admin', '照片已刪除', body, data)
+    if count > 0:
+        print(f'[FCM] Sent comment-deleted notification to {count} devices')
+    return count
+
+
+def notify_parents_comment_deleted(data_service, student_id, date, image_url=''):
+    """Silent data-only push to parents when a teacher deletes a chat photo.
+
+    The app uses this to remove the image from the chat immediately without showing a banner.
     """
     data = {
         'type': 'contact_book_comment_deleted',
         'studentId': str(student_id),
         'date': str(date),
+        'imageUrl': str(image_url),
+        'senderRole': 'teacher',
     }
-    count = send_to_role(data_service, 'teacher', '', '', data)
-    count += send_to_role(data_service, 'admin', '', '', data)
+    count = send_to_student_parents(data_service, str(student_id), '', '', data,
+                                    pref_column='contact_book_notify')
     if count > 0:
-        print(f'[FCM] Sent comment-deleted notification to {count} devices')
+        print(f'[FCM] Sent teacher comment-deleted (silent) to {count} parent devices')
     return count

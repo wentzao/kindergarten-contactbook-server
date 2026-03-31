@@ -73,6 +73,15 @@ def _get_comment_deleted_notifier():
         print(f'[Notification] Failed to import comment-deleted notifier: {e}')
         return None
 
+
+def _get_parent_comment_deleted_notifier():
+    try:
+        from services.send_notification import notify_parents_comment_deleted
+        return notify_parents_comment_deleted
+    except Exception as e:
+        print(f'[Notification] Failed to import parent comment-deleted notifier: {e}')
+        return None
+
 # Helper to deserialize json fields safely
 def load_json(val):
     if not val:
@@ -548,11 +557,17 @@ def delete_comment(student_id, date, comment_id):
                 c.get('createdAt') == comment_id
             )
 
+        deleted = [c for c in comments if _matches(c)]
         filtered = [c for c in comments if not _matches(c)]
 
         if len(filtered) == original_len:
             # Nothing was removed
             return jsonify({'error': 'Comment not found'}), 404
+
+        # Capture info before committing — needed for notification and cache eviction
+        deleted_image_url = deleted[0].get('content', '') if deleted else ''
+        deleted_sender_name = deleted[0].get('name', '家長') if deleted else '家長'
+        deleted_sender_role = deleted[0].get('senderRole', 'parent') if deleted else 'parent'
 
         conn.execute(
             'UPDATE contact_books SET comments = ?, last_modified = ? WHERE student_id = ? AND date = ?',
@@ -560,11 +575,17 @@ def delete_comment(student_id, date, comment_id):
         )
         conn.commit()
 
-        # Silently notify teachers so their chat view refreshes in real-time
+        # Notify the other party so their chat view refreshes and evicts the cached image.
+        # Teacher deleted → notify parents (silent). Parent deleted → notify teachers (visible).
         def _send_bg():
-            notify = _get_comment_deleted_notifier()
-            if notify:
-                notify(data_service, student_id, date)
+            if deleted_sender_role == 'teacher':
+                notify = _get_parent_comment_deleted_notifier()
+                if notify:
+                    notify(data_service, student_id, date, deleted_image_url)
+            else:
+                notify = _get_comment_deleted_notifier()
+                if notify:
+                    notify(data_service, student_id, date, deleted_image_url, deleted_sender_name)
         threading.Thread(target=_send_bg, daemon=True).start()
 
         return jsonify({'status': 'deleted', 'remaining': len(filtered)}), 200
