@@ -468,9 +468,11 @@ def notify_teachers_comment_deleted(data_service, student_id, date, image_url=''
 
 
 def notify_parents_comment_deleted(data_service, student_id, date, image_url=''):
-    """Silent data-only push to parents when a teacher deletes a chat photo.
+    """Push to parents when a teacher deletes a chat photo.
 
-    The app uses this to remove the image from the chat immediately without showing a banner.
+    Must include a title/body so Expo Push reliably delivers it via
+    addNotificationReceivedListener on iOS. The App suppresses the visible
+    banner for this notification type via setNotificationHandler.
     """
     data = {
         'type': 'contact_book_comment_deleted',
@@ -479,8 +481,9 @@ def notify_parents_comment_deleted(data_service, student_id, date, image_url='')
         'imageUrl': str(image_url),
         'senderRole': 'teacher',
     }
-    count = send_to_student_parents(data_service, str(student_id), '', '', data,
+    count = send_to_student_parents(data_service, str(student_id),
+                                    '照片已移除', '老師刪除了一張聊天照片', data,
                                     pref_column='contact_book_notify')
     if count > 0:
-        print(f'[FCM] Sent teacher comment-deleted (silent) to {count} parent devices')
+        print(f'[FCM] Sent teacher comment-deleted to {count} parent devices')
     return count
