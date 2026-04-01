@@ -13,6 +13,17 @@ CREATE TABLE teacher_profiles (
     updated_at VARCHAR(50)
 );
 
+-- Parent LINE profile cache (upserted on every comment; stores avatar blob so we own the data)
+DROP TABLE IF EXISTS parent_profiles;
+CREATE TABLE parent_profiles (
+    user_id VARCHAR(100) PRIMARY KEY,
+    display_name VARCHAR(200),
+    picture_url TEXT,
+    picture_data BLOB,
+    picture_mime VARCHAR(50) DEFAULT 'image/jpeg',
+    updated_at VARCHAR(50)
+);
+
 DROP TABLE IF EXISTS contact_books;
 CREATE TABLE contact_books (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

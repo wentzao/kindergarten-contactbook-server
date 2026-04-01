@@ -33,6 +33,7 @@ from routes.student_routes import student_bp
 from routes.notification_routes import notification_bp
 from routes.class_journal_routes import journal_bp
 from routes.lock_routes import lock_bp
+from routes.parent_routes import parent_bp
 
 app.register_blueprint(leave_bp, url_prefix='/api/leave')
 app.register_blueprint(med_bp, url_prefix='/api/meds')
@@ -44,6 +45,7 @@ app.register_blueprint(student_bp, url_prefix='/api/teacher')
 app.register_blueprint(notification_bp, url_prefix='/api/notifications')
 app.register_blueprint(journal_bp, url_prefix='/api/class-journal')
 app.register_blueprint(lock_bp, url_prefix='/api/locks')
+app.register_blueprint(parent_bp, url_prefix='/api/parents')
 
 # Request logging middleware
 @app.before_request

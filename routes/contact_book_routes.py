@@ -3,8 +3,58 @@ from datetime import datetime
 from urllib.parse import unquote
 import json
 import threading
+import requests as http_requests
 from services.data_service import DataService
 import os
+
+
+def _upsert_parent_profile(user_id: str, display_name: str, picture_url: str):
+    """Background task: upsert parent_profiles, re-fetching avatar blob if URL changed."""
+    if not user_id:
+        return
+    try:
+        conn = data_service.get_db()
+        now = datetime.now().isoformat()
+        row = conn.execute(
+            'SELECT picture_url FROM parent_profiles WHERE user_id = ?', (user_id,)
+        ).fetchone()
+
+        fetch_blob = (row is None) or (row['picture_url'] != picture_url and picture_url)
+        blob, mime = None, 'image/jpeg'
+
+        if fetch_blob and picture_url:
+            try:
+                resp = http_requests.get(picture_url, timeout=8)
+                if resp.ok:
+                    blob = resp.content
+                    mime = resp.headers.get('Content-Type', 'image/jpeg').split(';')[0]
+            except Exception as e:
+                print(f'[ParentProfile] avatar fetch error: {e}')
+
+        if row is None:
+            conn.execute(
+                'INSERT INTO parent_profiles (user_id, display_name, picture_url, picture_data, picture_mime, updated_at) VALUES (?,?,?,?,?,?)',
+                (user_id, display_name, picture_url, blob, mime, now)
+            )
+        else:
+            if fetch_blob and blob:
+                conn.execute(
+                    'UPDATE parent_profiles SET display_name=?, picture_url=?, picture_data=?, picture_mime=?, updated_at=? WHERE user_id=?',
+                    (display_name, picture_url, blob, mime, now, user_id)
+                )
+            else:
+                conn.execute(
+                    'UPDATE parent_profiles SET display_name=?, updated_at=? WHERE user_id=?',
+                    (display_name, now, user_id)
+                )
+        conn.commit()
+    except Exception as e:
+        print(f'[ParentProfile] upsert error: {e}')
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 contact_book_bp = Blueprint('contact_book', __name__)
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
@@ -480,13 +530,17 @@ def handle_comments(student_id, date):
                 'content': data['content'],
                 'createdAt': now_iso,
             }
-            # Only store name/profile for parents (teacher names resolved dynamically)
+            # Only store name/userId for parents (teacher names resolved dynamically)
             if sender_role == 'parent':
                 comment['name'] = data.get('name', '家長')
                 if data.get('userId'):
                     comment['userId'] = data['userId']
-                if data.get('pictureUrl'):
-                    comment['pictureUrl'] = data['pictureUrl']
+                    # Upsert profile in background (fetches blob if pictureUrl changed)
+                    threading.Thread(
+                        target=_upsert_parent_profile,
+                        args=(data['userId'], data.get('name', '家長'), data.get('pictureUrl', '')),
+                        daemon=True
+                    ).start()
             comments.append(comment)
 
             conn.execute('UPDATE contact_books SET comments = ?, last_modified = ? WHERE student_id = ? AND date = ?',
