@@ -225,6 +225,17 @@ class DataService:
 
     # ── Class Journal ──
 
+    @staticmethod
+    def _semester_from_date(date_str):
+        """Compute semester string (e.g. '114第2學期') from a YYYY-MM-DD date."""
+        year, month = int(date_str[:4]), int(date_str[5:7])
+        if month >= 8:
+            return f"{year - 1911}第1學期"
+        elif month == 1:
+            return f"{year - 1912}第1學期"
+        else:
+            return f"{year - 1912}第2學期"
+
     def get_class_journal(self, class_name, date):
         conn = self.get_db()
         try:
@@ -237,6 +248,7 @@ class DataService:
                     'id': r['id'],
                     'className': r['class_name'],
                     'date': r['date'],
+                    'semester': r['semester'],
                     'contentBlocks': json.loads(r['content_blocks']) if r['content_blocks'] else [],
                     'editedBy': json.loads(r['edited_by']) if r['edited_by'] else None,
                     'notifiedAt': r['notified_at'],
@@ -252,22 +264,24 @@ class DataService:
         try:
             now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S+08:00')
             journal_id = f"cj_{class_name}_{date}"
+            semester = self._semester_from_date(date)
             blocks_json = json.dumps(content_blocks, ensure_ascii=False)
             edited_json = json.dumps(edited_by, ensure_ascii=False) if edited_by else None
 
             conn.execute('''
-                INSERT INTO class_journals (id, class_name, date, content_blocks, edited_by, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO class_journals (id, class_name, date, semester, content_blocks, edited_by, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(class_name, date) DO UPDATE SET
                     content_blocks = excluded.content_blocks,
                     edited_by = excluded.edited_by,
                     updated_at = excluded.updated_at
-            ''', (journal_id, class_name, date, blocks_json, edited_json, now, now))
+            ''', (journal_id, class_name, date, semester, blocks_json, edited_json, now, now))
             conn.commit()
             return {
                 'id': journal_id,
                 'className': class_name,
                 'date': date,
+                'semester': semester,
                 'contentBlocks': content_blocks,
                 'editedBy': edited_by,
                 'updatedAt': now,

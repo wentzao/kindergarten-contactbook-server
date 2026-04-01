@@ -480,9 +480,13 @@ def handle_comments(student_id, date):
                 'content': data['content'],
                 'createdAt': now_iso,
             }
-            # Only store name for parents (teacher names resolved dynamically)
+            # Only store name/profile for parents (teacher names resolved dynamically)
             if sender_role == 'parent':
                 comment['name'] = data.get('name', '家長')
+                if data.get('userId'):
+                    comment['userId'] = data['userId']
+                if data.get('pictureUrl'):
+                    comment['pictureUrl'] = data['pictureUrl']
             comments.append(comment)
 
             conn.execute('UPDATE contact_books SET comments = ?, last_modified = ? WHERE student_id = ? AND date = ?',

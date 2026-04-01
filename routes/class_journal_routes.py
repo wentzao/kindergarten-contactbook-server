@@ -174,6 +174,7 @@ def get_journal_for_student(student_id, date):
     return jsonify({
         'date': date,
         'classJournal': {
+            'semester': journal.get('semester'),
             'contentBlocks': journal.get('contentBlocks', []),
             'editedBy': journal.get('editedBy'),
             'updatedAt': journal.get('updatedAt'),

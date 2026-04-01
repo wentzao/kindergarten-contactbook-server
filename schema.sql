@@ -135,6 +135,7 @@ CREATE TABLE class_journals (
     id VARCHAR(50) PRIMARY KEY,
     class_name VARCHAR(100) NOT NULL,
     date VARCHAR(20) NOT NULL,
+    semester VARCHAR(20),
     content_blocks TEXT DEFAULT '[]',
     edited_by TEXT,
     notified_at VARCHAR(50),
