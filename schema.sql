@@ -24,6 +24,18 @@ CREATE TABLE parent_profiles (
     updated_at VARCHAR(50)
 );
 
+-- Parent ↔ student relation (father/mother/paternal_grandfather/etc.)
+-- PRIMARY KEY (user_id, student_id) ensures one relation per parent per student.
+-- Uniqueness per relation slot is enforced at application layer.
+DROP TABLE IF EXISTS parent_student_relations;
+CREATE TABLE parent_student_relations (
+    user_id    VARCHAR(100) NOT NULL,
+    student_id VARCHAR(50)  NOT NULL,
+    relation   VARCHAR(50)  NOT NULL,
+    updated_at VARCHAR(50),
+    PRIMARY KEY (user_id, student_id)
+);
+
 DROP TABLE IF EXISTS contact_books;
 CREATE TABLE contact_books (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
