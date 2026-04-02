@@ -246,7 +246,6 @@ def line_callback():
             return resp
 
         user_id = profile_resp.json().get('userId')
-        print(f'[Auth] PWA LINE callback: userId={user_id}')
 
         # Step 3: 驗證教師身分
         teacher_data, status = _do_teacher_auth_raw(user_id)
@@ -264,7 +263,6 @@ def line_callback():
             'userData': teacher_data,
             'timestamp': time.time()
         }
-        print(f'[Auth] PWA login stored for token: {state[:8]}...')
 
         # Step 5: 顯示成功頁面
         teacher_name = teacher_data.get('name', '')
