@@ -683,7 +683,7 @@ def delete_comment(student_id, date, comment_id):
             return jsonify({'error': 'Comment not found'}), 404
 
         # Capture info before committing — needed for notification and cache eviction
-        deleted_image_url = deleted[0].get('content', '') if deleted else ''
+        deleted_content = deleted[0].get('content', '') if deleted else ''
         deleted_sender_name = deleted[0].get('name', '家長') if deleted else '家長'
         deleted_sender_role = deleted[0].get('senderRole', 'parent') if deleted else 'parent'
 
@@ -703,7 +703,7 @@ def delete_comment(student_id, date, comment_id):
             else:
                 notify = _get_comment_deleted_notifier()
                 if notify:
-                    notify(data_service, student_id, date, deleted_image_url, deleted_sender_name)
+                    notify(data_service, student_id, date, deleted_content, deleted_sender_name)
         threading.Thread(target=_send_bg, daemon=True).start()
 
         return jsonify({'status': 'deleted', 'remaining': len(filtered)}), 200

@@ -444,24 +444,39 @@ def notify_teachers_status_update(data_service, student_id, student_name, date, 
     return count
 
 
-def notify_teachers_comment_deleted(data_service, student_id, date, image_url='', sender_name='家長'):
-    """Visible push notification to teachers/admins when a parent deletes a chat photo.
+def notify_teachers_comment_deleted(data_service, student_id, date, content='', sender_name='家長'):
+    """Visible push notification to teachers/admins when a parent deletes a chat message.
 
-    Shows an OS-level notification banner when the PWA is in background, and
-    an in-app toast (not "新訊息") when the PWA is in foreground.
-    Does NOT trigger the unread-comments badge.
-    image_url is included so the teacher web can evict the specific URL from IndexedDB.
+    Detects whether the deleted item was a photo or a text message and produces
+    the appropriate title and body. sender_name is the parent's display name.
+    The imageUrl data field is kept for cache-eviction purposes on the web client.
     """
-    body = f'{sender_name} 刪除了 {date} 的一張照片'
+    student_name = lookup_student_name(student_id)
+
+    is_image = (
+        isinstance(content, str) and (
+            content.startswith('https://firebasestorage.googleapis.com') or
+            content.startswith('https://storage.googleapis.com') or
+            content.startswith('https://imageserver.wentzao.com')
+        )
+    )
+
+    if is_image:
+        title = '照片已刪除'
+        body = f'{student_name} 的家長刪除了 {date} 的一張照片'
+    else:
+        title = '留言已刪除'
+        body = f'{student_name} 的家長刪除了 {date} 的一則留言'
+
     data = {
         'type': 'contact_book_comment_deleted',
         'studentId': str(student_id),
         'date': str(date),
-        'imageUrl': str(image_url),
+        'imageUrl': content if is_image else '',
         'senderName': str(sender_name),
     }
-    count = send_to_role(data_service, 'teacher', '照片已刪除', body, data)
-    count += send_to_role(data_service, 'admin', '照片已刪除', body, data)
+    count = send_to_role(data_service, 'teacher', title, body, data)
+    count += send_to_role(data_service, 'admin', title, body, data)
     if count > 0:
         print(f'[FCM] Sent comment-deleted notification to {count} devices')
     return count
