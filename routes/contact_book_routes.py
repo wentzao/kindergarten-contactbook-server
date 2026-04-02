@@ -584,6 +584,66 @@ def handle_comments(student_id, date):
         conn.close()
 
 
+@contact_book_bp.route('/<student_id>/<date>/comments/<comment_id>', methods=['PATCH'])
+def edit_comment(student_id, date, comment_id):
+    """
+    Edit the content of a single comment identified by comment_id.
+    Matching order: comment['id'], comment['content'], comment['createdAt'].
+    Body: { "content": "new text" }
+    Returns the updated comment on success, 404 if not found.
+    """
+    comment_id = unquote(comment_id)
+    body = request.get_json()
+    if not body or 'content' not in body:
+        return jsonify({'error': 'Missing content'}), 400
+    new_content = body['content'].strip()
+    if not new_content:
+        return jsonify({'error': 'Content cannot be empty'}), 400
+
+    conn = data_service.get_db()
+    try:
+        row = conn.execute(
+            'SELECT comments FROM contact_books WHERE student_id = ? AND date = ?',
+            (student_id, date)
+        ).fetchone()
+        if not row:
+            return jsonify({'error': 'Record not found'}), 404
+
+        comments = load_json(row['comments']) or []
+
+        def _matches(c):
+            return (
+                c.get('id') == comment_id or
+                c.get('content') == comment_id or
+                c.get('createdAt') == comment_id
+            )
+
+        updated_comment = None
+        updated_comments = []
+        for c in comments:
+            if _matches(c) and updated_comment is None:
+                c = dict(c)
+                c['content'] = new_content
+                c['updatedAt'] = datetime.now().isoformat()
+                updated_comment = c
+            updated_comments.append(c)
+
+        if updated_comment is None:
+            return jsonify({'error': 'Comment not found'}), 404
+
+        conn.execute(
+            'UPDATE contact_books SET comments = ?, last_modified = ? WHERE student_id = ? AND date = ?',
+            (json.dumps(updated_comments, ensure_ascii=False), datetime.now().isoformat(), student_id, date)
+        )
+        conn.commit()
+        return jsonify(updated_comment), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
 @contact_book_bp.route('/<student_id>/<date>/comments/<comment_id>', methods=['DELETE'])
 def delete_comment(student_id, date, comment_id):
     """
