@@ -24,15 +24,13 @@ CREATE TABLE parent_profiles (
     updated_at VARCHAR(50)
 );
 
--- Parent ↔ student relation (father/mother/paternal_grandfather/etc.)
--- PRIMARY KEY (user_id, student_id) ensures one relation per parent per student.
--- Uniqueness per relation slot is enforced at application layer.
-DROP TABLE IF EXISTS parent_student_relations;
-CREATE TABLE parent_student_relations (
+-- Parent ↔ student binding — records which parents are linked to which students.
+-- Populated automatically when a parent binds a student in the app.
+DROP TABLE IF EXISTS student_bindings;
+CREATE TABLE student_bindings (
     user_id    VARCHAR(100) NOT NULL,
     student_id VARCHAR(50)  NOT NULL,
-    relation   VARCHAR(50)  NOT NULL,
-    updated_at VARCHAR(50),
+    created_at VARCHAR(50),
     PRIMARY KEY (user_id, student_id)
 );
 
