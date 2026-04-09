@@ -47,6 +47,21 @@ app.register_blueprint(journal_bp, url_prefix='/api/class-journal')
 app.register_blueprint(lock_bp, url_prefix='/api/locks')
 app.register_blueprint(parent_bp, url_prefix='/api/parents')
 
+# Drop legacy tables that are no longer used by the application
+def _run_startup_migrations():
+    import sqlite3
+    db_path = os.path.join(os.path.dirname(__file__), 'kindergarten.db')
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.execute('DROP TABLE IF EXISTS parent_student_relations')
+        conn.commit()
+        conn.close()
+        print('[startup] Dropped legacy table parent_student_relations (if existed)')
+    except Exception as e:
+        print(f'[startup] Migration warning: {e}')
+
+_run_startup_migrations()
+
 # Request logging middleware
 @app.before_request
 def log_request_info():

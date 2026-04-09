@@ -28,20 +28,29 @@ def get_avatar(user_id):
 
 @parent_bp.route('/<user_id>/profile', methods=['POST'])
 def save_profile(user_id):
-    """Upsert a parent's LINE profile and optionally record a student binding.
+    """Upsert a parent's LINE profile and record student bindings.
 
     Body JSON: {
         "display_name": "...",
-        "picture_url": "...",
-        "student_id": "..."   <- optional; when provided, registers this parent
-                                 as a guardian of that student
+        "picture_url":  "...",
+        "student_id":   "...",   <- single student (optional, backward compat)
+        "student_ids":  [...]    <- array of student IDs (optional)
     }
-    Called automatically on every app login, and again when binding a student.
+    Both student_id and student_ids may be provided simultaneously; duplicates
+    are deduplicated. Called on every app launch (with all child IDs) so that
+    any parent who authenticated via the external server is still registered
+    in student_bindings and appears in other guardians' related-parents lists.
     """
     data = request.get_json(silent=True) or {}
     display_name = (data.get('display_name') or '').strip()
     picture_url  = (data.get('picture_url')  or '').strip()
     student_id   = (data.get('student_id')   or '').strip()
+
+    # Accept either a single student_id or an array student_ids (or both)
+    raw_ids = data.get('student_ids') or []
+    student_ids = list({s.strip() for s in raw_ids if s and str(s).strip()})
+    if student_id and student_id not in student_ids:
+        student_ids.insert(0, student_id)
 
     # Fetch the LINE avatar blob so we own a copy of it
     picture_data = None
@@ -84,8 +93,8 @@ def save_profile(user_id):
                     updated_at   = excluded.updated_at
             ''', (user_id, display_name, picture_url, now_iso))
 
-        # Record the guardian → student binding if a student_id was provided
-        if student_id:
+        # Record guardian → student bindings for all provided student IDs
+        if student_ids:
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS student_bindings (
                     user_id    VARCHAR(100) NOT NULL,
@@ -94,10 +103,11 @@ def save_profile(user_id):
                     PRIMARY KEY (user_id, student_id)
                 )
             ''')
-            conn.execute('''
-                INSERT OR IGNORE INTO student_bindings (user_id, student_id, created_at)
-                VALUES (?, ?, ?)
-            ''', (user_id, student_id, now_iso))
+            for sid in student_ids:
+                conn.execute('''
+                    INSERT OR IGNORE INTO student_bindings (user_id, student_id, created_at)
+                    VALUES (?, ?, ?)
+                ''', (user_id, sid, now_iso))
 
         conn.commit()
         return jsonify({'ok': True}), 200
