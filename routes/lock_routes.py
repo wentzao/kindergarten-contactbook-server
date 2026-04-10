@@ -5,6 +5,13 @@ Lock types:
   - journal:{className}:{date}   — class journal content blocks
   - note:{studentId}:{date}      — individual student note
 
+Ownership model (v2):
+  - Lock ownership is determined by `lock_owner_id` (device-level identity).
+  - Same teacher + same browser/device → same lock_owner_id → can re-acquire.
+  - Same teacher + different device → different lock_owner_id → blocked.
+  - Frontend generates lock_owner_id via localStorage (Web) / SecureStore (Mobile),
+    ensuring it is shared across tabs but unique per browser/device.
+
 Locks auto-expire after LOCK_TTL_MINUTES. Frontend sends heartbeats to keep alive.
 """
 from flask import Blueprint, request, jsonify
@@ -118,7 +125,7 @@ def acquire_lock():
         existing_owner_id = existing['lock_owner_id'] if existing and 'lock_owner_id' in existing.keys() else None
 
         if existing and (existing_owner_id or existing['locked_by']) != lock_owner_id:
-            # Locked by another device/window owner
+            # Locked by a different device/user — deny
             return jsonify({
                 'acquired': False,
                 'lockedBy': existing['locked_by'],
@@ -127,7 +134,7 @@ def acquire_lock():
                 'expiresAt': existing['expires_at'],
             })
 
-        # Insert or update (same device/window re-acquiring is fine)
+        # Insert or update (same device re-acquiring is allowed)
         now = _now()
         expires = _expires()
         conn.execute('''
