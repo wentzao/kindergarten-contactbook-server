@@ -26,6 +26,33 @@ def get_journal(class_name, date):
     })
 
 
+@journal_bp.route('/<class_name>/month/<year_month>', methods=['GET'])
+def get_journals_for_month(class_name, year_month):
+    """Get all class journals for a class in a given month (YYYY-MM format)."""
+    conn = data_service.get_db()
+    try:
+        rows = conn.execute(
+            'SELECT * FROM class_journals WHERE class_name = ? AND date LIKE ?',
+            (class_name, f'{year_month}-%')
+        ).fetchall()
+        journals = []
+        for r in rows:
+            journals.append({
+                'id': r['id'],
+                'className': r['class_name'],
+                'date': r['date'],
+                'semester': r['semester'],
+                'contentBlocks': json.loads(r['content_blocks']) if r['content_blocks'] else [],
+                'editedBy': json.loads(r['edited_by']) if r['edited_by'] else None,
+                'notifiedAt': r['notified_at'],
+                'createdAt': r['created_at'],
+                'updatedAt': r['updated_at'],
+            })
+        return jsonify(journals)
+    finally:
+        conn.close()
+
+
 @journal_bp.route('/<class_name>/<date>', methods=['PUT'])
 def save_journal(class_name, date):
     """Save/update class journal content blocks (auto-save).
