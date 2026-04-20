@@ -6,7 +6,19 @@ Only requires: requests, google-auth
 import os
 import json
 import sqlite3
+import sys
+import warnings
 import requests
+
+# Keep Python 3.8 runtime quiet before migration; this warning is informational.
+if sys.version_info[:2] == (3, 8):
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*Python version 3\.8 past its end of life.*",
+        category=FutureWarning,
+        module=r"google\.auth",
+    )
+
 from google.oauth2 import service_account
 from google.auth.transport.requests import Request as GoogleAuthRequest
 

@@ -2,3 +2,4 @@ flask
 flask-cors
 werkzeug
 requests
+google-auth>=2.23,<3
