@@ -686,6 +686,14 @@ def delete_comment(student_id, date, comment_id):
         deleted_content = deleted[0].get('content', '') if deleted else ''
         deleted_sender_name = deleted[0].get('name', '家長') if deleted else '家長'
         deleted_sender_role = deleted[0].get('senderRole', 'parent') if deleted else 'parent'
+        is_deleted_image = (
+            isinstance(deleted_content, str) and (
+                deleted_content.startswith('https://firebasestorage.googleapis.com') or
+                deleted_content.startswith('https://storage.googleapis.com') or
+                deleted_content.startswith('https://imageserver.wentzao.com')
+            )
+        )
+        deleted_image_url = deleted_content if is_deleted_image else ''
 
         conn.execute(
             'UPDATE contact_books SET comments = ?, last_modified = ? WHERE student_id = ? AND date = ?',

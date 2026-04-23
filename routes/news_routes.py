@@ -346,6 +346,20 @@ def notify_news(news_id):
         conn.close()
 
 
+@news_bp.route('/<news_id>/notify-silent', methods=['POST'])
+def notify_news_silent(news_id):
+    """Send silent data-only push for announcement cache refresh (no user-visible banner)."""
+    conn = data_service.get_db()
+    try:
+        r = conn.execute('SELECT id FROM news WHERE id = ?', (news_id,)).fetchone()
+        if not r:
+            return jsonify({'error': 'News not found'}), 404
+        _notify_announcement_update_bg(news_id)
+        return jsonify({'status': 'queued'})
+    finally:
+        conn.close()
+
+
 def _notify_announcement_bg(news_id, title_text, body_text=''):
     """Send announcement notification to all parents in a background thread."""
     def _send():
@@ -354,4 +368,15 @@ def _notify_announcement_bg(news_id, title_text, body_text=''):
             notify_parents_announcement(data_service, news_id, title_text, body_text)
         except Exception as e:
             print(f'[Notification] Error sending announcement notification: {e}')
+    threading.Thread(target=_send, daemon=True).start()
+
+
+def _notify_announcement_update_bg(news_id):
+    """Send silent announcement-update push to refresh app data without visible notification."""
+    def _send():
+        try:
+            from services.send_notification import notify_parents_announcement_update
+            notify_parents_announcement_update(data_service, news_id)
+        except Exception as e:
+            print(f'[Notification] Error sending silent announcement update: {e}')
     threading.Thread(target=_send, daemon=True).start()
