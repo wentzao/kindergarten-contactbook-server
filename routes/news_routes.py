@@ -192,20 +192,29 @@ def create_news():
 
         status = data.get('status', 'published')
         first_published_at = now.isoformat() if status == 'published' else None
+        is_pinned = 1 if data.get('isPinned') else 0
+        pin_order_val = None
+
+        if is_pinned:
+            # New pinned article should become the latest pinned item (top = 0).
+            conn.execute(
+                'UPDATE news SET pin_order = COALESCE(pin_order, 0) + 1 WHERE is_pinned = 1'
+            )
+            pin_order_val = 0
 
         conn.execute('''
             INSERT INTO news (
                 id, title, tag, cover_image, content_blocks, author,
                 is_pinned, publish_at, created_at, updated_at, created_by,
-                survey_id, target_classes, status, ref_no, first_published_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                survey_id, target_classes, status, ref_no, first_published_at, pin_order
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             news_id, data.get('title'), data.get('tag', '一般公告'), data.get('coverImage'),
             json.dumps(data.get('contentBlocks', []), ensure_ascii=False), data.get('author'),
-            1 if data.get('isPinned') else 0, data.get('publishAt', now.isoformat()),
+            is_pinned, data.get('publishAt', now.isoformat()),
             now.isoformat(), now.isoformat(), data.get('createdBy', 'admin'),
             data.get('surveyId'), json.dumps(data.get('targetClasses', []), ensure_ascii=False),
-            status, data.get('refNo'), first_published_at
+            status, data.get('refNo'), first_published_at, pin_order_val
         ))
         conn.commit()
 
@@ -274,7 +283,15 @@ def update_news(news_id):
         elif new_pinned and not old_pinned:
             # Newly pinned: bump all other pinned articles, place this one at top (0)
             conn.execute(
-                'UPDATE news SET pin_order = pin_order + 1 WHERE is_pinned = 1 AND id != ?',
+                'UPDATE news SET pin_order = COALESCE(pin_order, 0) + 1 WHERE is_pinned = 1 AND id != ?',
+                (news_id,)
+            )
+            pin_order_val = 0
+        elif new_pinned and current_pin_order is None:
+            # Legacy repair: this item is pinned but has no ordering value yet.
+            # Move it to top so it behaves as "latest pinned", and keep ordering consistent.
+            conn.execute(
+                'UPDATE news SET pin_order = COALESCE(pin_order, 0) + 1 WHERE is_pinned = 1 AND id != ?',
                 (news_id,)
             )
             pin_order_val = 0
