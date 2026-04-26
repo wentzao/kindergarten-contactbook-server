@@ -34,6 +34,7 @@ from routes.notification_routes import notification_bp
 from routes.class_journal_routes import journal_bp
 from routes.lock_routes import lock_bp
 from routes.parent_routes import parent_bp
+from routes.collab_routes import collab_bp, collab_sock
 
 app.register_blueprint(leave_bp, url_prefix='/api/leave')
 app.register_blueprint(med_bp, url_prefix='/api/meds')
@@ -46,6 +47,8 @@ app.register_blueprint(notification_bp, url_prefix='/api/notifications')
 app.register_blueprint(journal_bp, url_prefix='/api/class-journal')
 app.register_blueprint(lock_bp, url_prefix='/api/locks')
 app.register_blueprint(parent_bp, url_prefix='/api/parents')
+app.register_blueprint(collab_bp, url_prefix='/api/collab')
+collab_sock.init_app(app)
 
 # Drop legacy tables that are no longer used by the application
 def _run_startup_migrations():

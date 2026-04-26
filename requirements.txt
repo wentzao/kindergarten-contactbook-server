@@ -1,5 +1,7 @@
 flask
 flask-cors
+flask-sock
+simple-websocket
 werkzeug
 requests
 google-auth>=2.23,<3

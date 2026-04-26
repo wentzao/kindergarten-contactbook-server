@@ -3,6 +3,8 @@
 > 版本：v2（2026-04-10）
 > 適用範圍：後端 API、教師 Web 前端、教師 Mobile App
 
+> v3 重構草案：若要改成 Google Docs 類多人即時協作，請看 `docs/realtime-collaboration-system.md`。本文件只描述現行 v2 悲觀鎖機制。
+
 ---
 
 ## 1. 概述
