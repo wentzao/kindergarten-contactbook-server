@@ -52,7 +52,7 @@ v3 不再把班級日誌與個人備註視為「需要互斥鎖的格子」，�
 2. 鎖定只保留給破壞性動作或單次流程，例如刪除整份日誌、發布、批次清空。
 3. 內容同步使用 CRDT 或等價的可合併操作紀錄，不可用 last-write-wins 覆蓋整份文件。
 4. 使用者在線狀態、正在編輯哪個 block、游標位置是 presence，必須是暫存資料，不寫入正式內容。
-5. 後端仍需把協作文件 materialize 回現有資料表，讓家長端與舊 API 不必一次改完。
+5. 後端必須沿用現有資料表，讓家長端、舊 API 與既有備份流程不必一次改完。
 
 建議技術選型：
 
@@ -154,42 +154,22 @@ v3 不再把班級日誌與個人備註視為「需要互斥鎖的格子」，�
 3. block 排序可以是 CRDT list；若使用 snapshot materialization，仍輸出成目前 API 的 array。
 4. 富文字 `text` block 在 v3 前期可先維持 Web-only；跨端即時協作先以 `plaintext`、活動、需帶、帶回、圖片 metadata 為優先。
 
-### 4.2 新增後端資料表
+### 4.2 後端資料表限制
 
-建議新增，不直接改掉現有 `class_journals` / `contact_books`。
+目前不新增資料表。協作第一版必須直接沿用現有表：
 
-```sql
-CREATE TABLE collab_documents (
-    document_id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL,
-    owner_key TEXT NOT NULL,
-    crdt_binary BLOB NOT NULL,
-    snapshot_json TEXT NOT NULL,
-    snapshot_version INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
+| 文件 | 寫回資料表 | 寫回欄位 |
+|---|---|---|
+| `journal:{className}:{date}` | `class_journals` | `content_blocks`, `edited_by`, `updated_at` |
+| `note:{studentId}:{date}` | `contact_books` | `original_teacher`, `items_to_bring`, `returned_items`, `survey_id`, `edited_by`, `last_modified` |
 
-CREATE TABLE collab_snapshots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    document_id TEXT NOT NULL,
-    snapshot_version INTEGER NOT NULL,
-    snapshot_json TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
+規則：
 
-CREATE TABLE collab_sessions (
-    session_id TEXT PRIMARY KEY,
-    document_id TEXT NOT NULL,
-    actor_id TEXT NOT NULL,
-    device_id TEXT NOT NULL,
-    display_name TEXT,
-    connected_at TEXT NOT NULL,
-    last_seen_at TEXT NOT NULL
-);
-```
-
-`collab_sessions` 是輔助狀態；presence 仍以 WebSocket 記憶體狀態為主，server restart 後可全部視為離線。
+1. WebSocket 連線、participants、presence、正在輸入狀態只放記憶體。
+2. server restart 後 presence 全部消失是可接受行為。
+3. 即時內容先以記憶體 snapshot 廣播，並 debounce 寫回既有表。
+4. 不建立 `collab_documents`、`collab_sessions` 或 CRDT history 表。
+5. 若未來要完整 CRDT history，必須另外提案，不可在本階段偷加 schema。
 
 ---
 
@@ -264,10 +244,10 @@ Event types：
 
 | type | payload | 是否持久化 | 說明 |
 |---|---|---:|---|
-| `doc.update` | CRDT binary update, base64 | 是 | 文件內容變更 |
+| `doc.update` | live snapshot update | 是 | 文件內容變更 |
 | `presence.update` | presence state | 否 | 游標、focus、是否正在輸入 |
 | `presence.leave` | sessionId | 否 | 離開文件 |
-| `snapshot.saved` | snapshotVersion, updatedAt | 是 | server 已 materialize |
+| `snapshot.saved` | updatedAt | 是 | server 已寫回既有資料表 |
 | `document.deleted` | deletedBy, deletedAt | 是 | 整份文件刪除 |
 | `error` | code, message | 否 | 權限、格式、版本錯誤 |
 
@@ -302,7 +282,7 @@ Presence payload：
 
 規則：
 
-1. presence 不寫入 `collab_documents`。
+1. presence 不寫入資料表。
 2. presence 需要節流，建議每 80-150ms 最多送一次。
 3. 文字輸入時至少送 `focus.path` 與 `isTyping`；能取得 selection 的平台才送 `selection`。
 4. 遠端游標顯示名稱用 `displayName`，顏色用 actor color。
@@ -315,22 +295,21 @@ Presence payload：
 
 Server 收到 `doc.update` 後：
 
-1. 套用 CRDT update 到記憶體中的 document。
-2. debounce 500-2000ms 後存 `collab_documents.crdt_binary`。
-3. 同時輸出 `snapshot_json`。
-4. 依 `kind` materialize 到舊資料表：
+1. 套用 update 到記憶體中的 document snapshot。
+2. 立即廣播給同一 `documentId` 的其他線上 client。
+3. debounce 500-2000ms 後寫回現有資料表：
    - `journal:*` → `class_journals.content_blocks`
    - `note:*` → `contact_books.original_teacher`
-5. materialize 成功後廣播 `snapshot.saved`。
-6. 必要時仍發 FCM `data_updated` 給未在線或舊版 client。
+4. 寫回成功後廣播 `snapshot.saved`。
+5. 必要時仍發 FCM `data_updated` 給未在線或舊版 client。
 
 規則：
 
-1. CRDT binary 是協作真相來源。
-2. 舊資料表是對外相容 snapshot。
-3. 不可以從 snapshot JSON 反覆重建 CRDT binary 後覆蓋原 CRDT；這會破壞 merge history。
-4. 若 `collab_documents` 尚不存在，第一次 bootstrap 從現有 `class_journals` 或 `contact_books` seed。
-5. 若舊端透過 PUT 儲存，後端必須把舊端寫入轉成一個 server-side CRDT transaction，而不是直接覆蓋 snapshot。
+1. 現階段真相來源是「記憶體中的 live snapshot + 既有資料表最後保存版本」。
+2. 這不是完整 CRDT history；它是先交付 live editing 體感的相容層。
+3. 若 WebSocket 不在線，client 可 fallback 到現有 REST auto-save。
+4. 第一次 bootstrap 一律從現有 `class_journals` 或 `contact_books` seed。
+5. 舊端透過 REST PUT 儲存時，線上協作端可能收到 `data_updated` 後重新 bootstrap。
 
 ---
 
@@ -338,11 +317,11 @@ Server 收到 `doc.update` 後：
 
 Web 重構目標：
 
-1. 新增 `collaborationService`，負責 bootstrap、WebSocket、CRDT update、presence。
+1. 新增 `collaborationService`，負責 bootstrap、WebSocket、live update、presence。
 2. `ClassJournalEditor.jsx` 不再直接管理 `heldLocksRef` 作為正常編輯入口。
 3. `BlockEditor` 的 `blocks` 來源改為 collaboration session state。
 4. 每個 block 編輯器 focus 時送 `presence.update`。
-5. 編輯文字、增刪 block、移動 block 都必須是 CRDT transaction。
+5. 編輯文字、增刪 block、移動 block 都必須透過 WebSocket live update 廣播；未來若導入 CRDT，再升級為 CRDT transaction。
 6. UI 顯示 participant chips、遠端 block focus badge、可行時顯示文字游標。
 7. 舊 `lockService` 僅保留 publish/delete/clear-date 這類 destructive action。
 
@@ -396,7 +375,7 @@ Swift WebSocket：
 
 目前 backend 是 Flask + WSGI 風格。長連線協作不應硬塞進一般同步 request handler。
 
-建議兩種路線：
+第一版採用現有 Flask + eventlet + single worker，presence 放記憶體，並直接寫回現有資料表。若未來流量變大，再評估以下路線：
 
 ### A. Node collaboration sidecar（優先）
 
@@ -404,12 +383,12 @@ Swift WebSocket：
 2. 使用 Automerge Repo WebSocket adapter。
 3. sidecar 負責 CRDT sync、presence、WebSocket。
 4. Flask 保留 REST、權限、materialize API。
-5. sidecar 透過內網呼叫 Flask 或共用 SQLite 寫入 `collab_documents`。
+5. sidecar 透過內網呼叫 Flask 或共用 SQLite 寫回現有資料表，不新增協作資料表。
 
 ### B. Python ASGI collaboration service
 
 1. 新增 ASGI app，使用 WebSocket。
-2. 自行處理 CRDT binary update 與 presence。
+2. 自行處理 live update 與 presence。
 3. Flask REST 與 ASGI WS 可在 nginx 分流。
 
 不建議：
@@ -430,17 +409,16 @@ Swift WebSocket：
 
 ### Phase 1 — Collab 基礎建設
 
-1. 建 `collab_documents` schema。
-2. 建 bootstrap API。
-3. 建 WebSocket service。
-4. 從現有資料 seed CRDT document。
-5. 寫 materializer：CRDT → 現有資料表。
+1. 建 bootstrap API，從現有資料表讀 snapshot。
+2. 建 WebSocket service，presence 放記憶體。
+3. 收到 live update 後 debounce 寫回現有資料表。
+4. 不新增 schema。
 
 ### Phase 2 — Web POC
 
 1. 只開 `journal:{className}:{date}`。
-2. 先支援 `plaintext`、增刪 block、排序。
-3. 顯示 participant chips 與 block-level presence。
+2. 先支援完整 `contentBlocks` snapshot 即時同步、增刪 block、排序。
+3. 顯示 participant chips 與正在輸入狀態。
 4. feature flag 小範圍測試。
 
 ### Phase 3 — 學生備註
@@ -487,7 +465,7 @@ Swift WebSocket：
 必須：
 
 1. 所有協作端共用 `documentId`、actor、presence、event envelope 定義。
-2. 正常編輯使用 CRDT update。
+2. 正常編輯使用 WebSocket live update；若未來引入 CRDT，仍不得新增資料表除非先更新本規格。
 3. presence 暫存，不進正式內容。
 4. 後端 materialize 到舊資料表維持相容。
 5. 每個 block 保持穩定 id。
@@ -496,10 +474,10 @@ Swift WebSocket：
 禁止：
 
 1. 用 `editing_locks` 阻擋正常多人編輯。
-2. 用整份 JSON last-write-wins 當協作同步。
+2. 在未接 WebSocket 的情況下用整份 JSON last-write-wins 假裝協作同步。
 3. 信任 client 傳來的 userId 作為權限依據。
 4. 把游標、正在輸入、在線狀態寫進正式內容。
-5. 讓舊 REST PUT 直接覆蓋 CRDT snapshot。
+5. 未經規格更新就新增協作資料表。
 
 ---
 
