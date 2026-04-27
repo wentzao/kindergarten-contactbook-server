@@ -29,6 +29,7 @@ data_service = DataService(DATA_DIR)
 
 SAVE_DEBOUNCE_SECONDS = 1.0
 STALE_PARTICIPANT_SECONDS = 45
+MAX_TEXT_HISTORY_PER_BLOCK = 500
 
 _state_lock = threading.RLock()
 _documents = {}
@@ -144,6 +145,8 @@ def _ensure_document(document_id):
             'documentId': document_id,
             'snapshot': snapshot,
             'serverSeq': 0,
+            'blockVersions': {},
+            'textHistory': {},
             'clients': {},
             'participants': {},
             'saveTimer': None,
@@ -178,6 +181,136 @@ def _active_participants(doc, exclude_stale=True):
 def _next_server_seq(doc):
     doc['serverSeq'] += 1
     return doc['serverSeq']
+
+
+def _find_block(content_blocks, block_id):
+    if not block_id or not isinstance(content_blocks, list):
+        return None
+    for block in content_blocks:
+        if isinstance(block, dict) and block.get('id') == block_id:
+            return block
+    return None
+
+
+def _text_value(value):
+    return value if isinstance(value, str) else ''
+
+
+def _clamp_int(value, lower, upper):
+    try:
+        number = int(value)
+    except Exception:
+        number = lower
+    return max(lower, min(upper, number))
+
+
+def _transform_text_position(position, history_op, prefer_after_insert=False):
+    start = int(history_op.get('start') or 0)
+    delete_count = max(0, int(history_op.get('deleteCount') or 0))
+    insert_text = history_op.get('insertText') or ''
+    insert_len = len(insert_text)
+    end = start + delete_count
+    delta = insert_len - delete_count
+
+    if position < start:
+        return position
+    if position == start and delete_count == 0:
+        return position + insert_len if prefer_after_insert else position
+    if position <= end:
+        return start + insert_len
+    return position + delta
+
+
+def _transform_text_operation(operation, history):
+    start = max(0, int(operation.get('start') or 0))
+    delete_count = max(0, int(operation.get('deleteCount') or 0))
+    insert_text = operation.get('insertText') or ''
+    end = start + delete_count
+
+    for item in history:
+        start = _transform_text_position(start, item, prefer_after_insert=True)
+        end = _transform_text_position(end, item, prefer_after_insert=True)
+        if end < start:
+            end = start
+
+    return {
+        'start': start,
+        'deleteCount': max(0, end - start),
+        'insertText': insert_text,
+    }
+
+
+def _apply_text_operation(text, operation):
+    start = _clamp_int(operation.get('start'), 0, len(text))
+    delete_count = _clamp_int(operation.get('deleteCount'), 0, len(text) - start)
+    insert_text = operation.get('insertText') or ''
+    return text[:start] + insert_text + text[start + delete_count:]
+
+
+def _apply_journal_text_operation(doc, payload, actor):
+    snapshot = doc.get('snapshot') or {}
+    content_blocks = snapshot.get('contentBlocks') or []
+    block_id = payload.get('blockId')
+    block = _find_block(content_blocks, block_id)
+    if not block:
+        return None, {'code': 'block_not_found'}
+    if block.get('type') != 'plaintext':
+        return None, {'code': 'plaintext_only'}
+
+    current_version = int(doc['blockVersions'].get(block_id, 0))
+    base_version = _clamp_int(payload.get('baseVersion'), 0, current_version)
+    operation = payload.get('operation') or {}
+    if not isinstance(operation, dict):
+        return None, {'code': 'operation_required'}
+
+    history = [
+        item for item in doc['textHistory'].get(block_id, [])
+        if int(item.get('version') or 0) > base_version
+    ]
+    transformed = _transform_text_operation(operation, history)
+    current_text = _text_value(block.get('content'))
+    transformed['start'] = _clamp_int(transformed.get('start'), 0, len(current_text))
+    transformed['deleteCount'] = _clamp_int(
+        transformed.get('deleteCount'),
+        0,
+        len(current_text) - transformed['start'],
+    )
+
+    block['content'] = _apply_text_operation(current_text, transformed)
+    edited_by = payload.get('editedBy') or {
+        'userId': actor.get('actorId'),
+        'cname': actor.get('displayName'),
+        'ename': '',
+    }
+    snapshot['editedBy'] = edited_by
+    snapshot['updatedAt'] = _now()
+    doc['dirty'] = True
+
+    next_version = current_version + 1
+    doc['blockVersions'][block_id] = next_version
+    history_item = {
+        'version': next_version,
+        'sessionId': payload.get('sessionId') or '',
+        'start': transformed['start'],
+        'deleteCount': transformed['deleteCount'],
+        'insertText': transformed.get('insertText') or '',
+        'sentAt': _now(),
+    }
+    block_history = doc['textHistory'].setdefault(block_id, [])
+    block_history.append(history_item)
+    if len(block_history) > MAX_TEXT_HISTORY_PER_BLOCK:
+        del block_history[:-MAX_TEXT_HISTORY_PER_BLOCK]
+
+    return {
+        'blockId': block_id,
+        'baseVersion': base_version,
+        'version': next_version,
+        'operation': transformed,
+        'contentBlocks': content_blocks,
+        'blockVersions': dict(doc['blockVersions']),
+        'editedBy': edited_by,
+        'cursor': payload.get('cursor'),
+    }, None
 
 
 def _send_json(ws, message):
@@ -402,6 +535,7 @@ def bootstrap_document(document_id):
             'documentId': document_id,
             'serverSeq': doc['serverSeq'],
             'snapshot': doc['snapshot'],
+            'blockVersions': dict(doc.get('blockVersions') or {}),
             'participants': _active_participants(doc),
         })
 
@@ -443,6 +577,7 @@ def collab_ws(ws):
             'actor': actor,
             'payload': {
                 'snapshot': doc['snapshot'],
+                'blockVersions': dict(doc.get('blockVersions') or {}),
                 'participants': _active_participants(doc),
             },
         }
@@ -499,6 +634,61 @@ def collab_ws(ws):
                 _broadcast(document_id, event, exclude_session_id=session_id)
                 continue
 
+            if msg_type == 'text.operation':
+                parsed = _parse_document_id(document_id)
+                if not parsed or parsed['kind'] != 'journal':
+                    _send_json(ws, {'type': 'error', 'payload': {'code': 'journal_required'}})
+                    continue
+
+                payload['sessionId'] = session_id
+                with _state_lock:
+                    doc = _documents.get(document_id)
+                    if not doc:
+                        continue
+                    result_payload, error_payload = _apply_journal_text_operation(doc, payload, actor)
+                    if error_payload:
+                        _send_json(ws, {'type': 'error', 'payload': error_payload})
+                        continue
+                    participant = doc['participants'].get(session_id)
+                    if participant:
+                        participant['presence'] = {
+                            'focus': {
+                                'path': document_id,
+                                'field': 'contentBlocks',
+                                'blockId': result_payload.get('blockId'),
+                            },
+                            'isTyping': True,
+                            'cursor': payload.get('cursor'),
+                        }
+                    event = {
+                        'protocolVersion': 1,
+                        'type': 'text.operation',
+                        'documentId': document_id,
+                        'sessionId': session_id,
+                        'clientSeq': message.get('clientSeq'),
+                        'serverSeq': _next_server_seq(doc),
+                        'sentAt': _now(),
+                        'actor': actor,
+                        'payload': result_payload,
+                    }
+                    presence_event = {
+                        'protocolVersion': 1,
+                        'type': 'presence.update',
+                        'documentId': document_id,
+                        'sessionId': session_id,
+                        'serverSeq': _next_server_seq(doc),
+                        'sentAt': _now(),
+                        'actor': actor,
+                        'payload': {
+                            'participant': _participant_payload(participant),
+                        },
+                    } if participant else None
+                _broadcast(document_id, event)
+                if presence_event:
+                    _broadcast(document_id, presence_event, exclude_session_id=session_id)
+                _schedule_save(document_id)
+                continue
+
             if msg_type == 'doc.update':
                 parsed = _parse_document_id(document_id)
                 content_blocks = payload.get('contentBlocks')
@@ -530,6 +720,9 @@ def collab_ws(ws):
                         next_payload['note'] = note_payload
                     else:
                         next_payload['contentBlocks'] = content_blocks
+                        doc['blockVersions'] = {}
+                        doc['textHistory'] = {}
+                        next_payload['blockVersions'] = dict(doc['blockVersions'])
                     event = {
                         'protocolVersion': 1,
                         'type': 'doc.update',
