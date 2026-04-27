@@ -57,7 +57,45 @@ def _parse_document_id(document_id):
         class_name, date = rest.rsplit(':', 1)
         if class_name and date:
             return {'kind': 'journal', 'className': class_name, 'date': date}
+    if document_id.startswith('note:'):
+        rest = document_id[len('note:'):]
+        if ':' not in rest:
+            return None
+        student_id, date = rest.rsplit(':', 1)
+        if student_id and date:
+            return {'kind': 'note', 'studentId': student_id, 'date': date}
     return None
+
+
+def _load_json(value, fallback=None):
+    if value is None or value == '':
+        return fallback
+    try:
+        return json.loads(value)
+    except Exception:
+        return fallback
+
+
+def _contact_row_to_note_snapshot(row, parsed):
+    teacher_data = _load_json(row['original_teacher'] if row else None, {}) or {}
+    items = _load_json(row['items_to_bring'] if row else None)
+    if items and isinstance(items, dict) and 'items' in items:
+        teacher_data['itemsToBring'] = items.get('items') or []
+    returned = _load_json(row['returned_items'] if row else None)
+    if returned:
+        teacher_data['returnedItems'] = returned
+    if row and row['survey_id']:
+        teacher_data['surveyId'] = row['survey_id']
+
+    return {
+        'documentId': f"note:{parsed['studentId']}:{parsed['date']}",
+        'kind': 'note',
+        'studentId': parsed['studentId'],
+        'date': parsed['date'],
+        'note': teacher_data,
+        'updatedAt': row['last_modified'] if row else None,
+        'editedBy': _load_json(row['edited_by'] if row else None),
+    }
 
 
 def _load_snapshot(document_id):
@@ -76,6 +114,18 @@ def _load_snapshot(document_id):
             'updatedAt': record.get('updatedAt') if record else None,
             'editedBy': record.get('editedBy') if record else None,
         }
+
+    if parsed['kind'] == 'note':
+        conn = data_service.get_db()
+        try:
+            row = conn.execute(
+                '''SELECT original_teacher, items_to_bring, returned_items, survey_id, edited_by, last_modified
+                   FROM contact_books WHERE student_id = ? AND date = ?''',
+                (parsed['studentId'], parsed['date'])
+            ).fetchone()
+            return _contact_row_to_note_snapshot(row, parsed)
+        finally:
+            conn.close()
 
     return None
 
@@ -203,7 +253,31 @@ def _persist_document(document_id):
         doc['saveTimer'] = None
 
     parsed = _parse_document_id(document_id)
-    if not parsed or parsed['kind'] != 'journal':
+    if not parsed:
+        return
+
+    if parsed['kind'] == 'note':
+        result = _save_note_snapshot(parsed, snapshot)
+        with _state_lock:
+            doc = _documents.get(document_id)
+            if not doc:
+                return
+            doc['snapshot']['updatedAt'] = result.get('updatedAt')
+            message = {
+                'protocolVersion': 1,
+                'type': 'snapshot.saved',
+                'documentId': document_id,
+                'serverSeq': _next_server_seq(doc),
+                'sentAt': _now(),
+                'payload': {
+                    'updatedAt': result.get('updatedAt'),
+                },
+            }
+        _broadcast(document_id, message)
+        _send_data_updated(parsed, result)
+        return
+
+    if parsed['kind'] != 'journal':
         return
 
     edited_by = snapshot.get('editedBy') or {}
@@ -234,17 +308,81 @@ def _persist_document(document_id):
     _send_data_updated(parsed, result)
 
 
+def _save_note_snapshot(parsed, snapshot):
+    note_data = dict(snapshot.get('note') or {})
+    edited_by_raw = snapshot.get('editedBy') or {}
+    year, month, _day = map(int, parsed['date'].split('-'))
+    now = datetime.now().isoformat()
+
+    raw_items = note_data.pop('itemsToBring', None)
+    if raw_items and isinstance(raw_items, list) and len(raw_items) > 0:
+        items_to_bring = json.dumps({'items': raw_items}, ensure_ascii=False)
+    else:
+        items_to_bring = None
+
+    raw_returned = note_data.pop('returnedItems', None)
+    if raw_returned and isinstance(raw_returned, list) and len(raw_returned) > 0:
+        returned_items = json.dumps(raw_returned, ensure_ascii=False)
+    else:
+        returned_items = None
+
+    survey_id = note_data.pop('surveyId', None) or None
+    edited_by = json.dumps({
+        'userId': edited_by_raw.get('userId', ''),
+        'cname': edited_by_raw.get('cname', ''),
+        'ename': edited_by_raw.get('ename', ''),
+        'editedAt': now,
+    }, ensure_ascii=False) if edited_by_raw else None
+
+    conn = data_service.get_db()
+    try:
+        row = conn.execute(
+            'SELECT id, status FROM contact_books WHERE student_id = ? AND date = ?',
+            (parsed['studentId'], parsed['date'])
+        ).fetchone()
+        teacher_json = json.dumps(note_data, ensure_ascii=False)
+        if not row:
+            conn.execute('''
+                INSERT INTO contact_books (student_id, date, year, month, status, original_teacher,
+                    items_to_bring, returned_items, survey_id, edited_by, last_modified)
+                VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)
+            ''', (parsed['studentId'], parsed['date'], year, month, teacher_json,
+                  items_to_bring, returned_items, survey_id, edited_by, now))
+        else:
+            current_status = row['status']
+            new_status = current_status if current_status in ('notified', 'read', 'signed') else 'draft'
+            conn.execute('''
+                UPDATE contact_books SET original_teacher = ?, items_to_bring = ?,
+                    returned_items = ?, survey_id = ?, edited_by = ?, status = ?, last_modified = ?
+                WHERE student_id = ? AND date = ?
+            ''', (teacher_json, items_to_bring, returned_items, survey_id, edited_by,
+                  new_status, now, parsed['studentId'], parsed['date']))
+        conn.commit()
+        return {'updatedAt': now, 'studentId': parsed['studentId'], 'date': parsed['date']}
+    finally:
+        conn.close()
+
+
 def _send_data_updated(parsed, result):
     def _notify():
         try:
             from services.send_notification import send_to_role
-            notify_data = {
-                'type': 'data_updated',
-                'dataType': 'class_journal',
-                'className': parsed['className'],
-                'date': parsed['date'],
-                'updatedAt': result.get('updatedAt', ''),
-            }
+            if parsed['kind'] == 'note':
+                notify_data = {
+                    'type': 'data_updated',
+                    'dataType': 'student_notes',
+                    'date': parsed['date'],
+                    'studentIds': json.dumps([parsed['studentId']], ensure_ascii=False),
+                    'updatedAt': result.get('updatedAt', ''),
+                }
+            else:
+                notify_data = {
+                    'type': 'data_updated',
+                    'dataType': 'class_journal',
+                    'className': parsed['className'],
+                    'date': parsed['date'],
+                    'updatedAt': result.get('updatedAt', ''),
+                }
             send_to_role(data_service, 'teacher', '', '', notify_data)
             send_to_role(data_service, 'admin', '', '', notify_data)
         except Exception as e:
@@ -362,9 +500,14 @@ def collab_ws(ws):
                 continue
 
             if msg_type == 'doc.update':
+                parsed = _parse_document_id(document_id)
                 content_blocks = payload.get('contentBlocks')
-                if not isinstance(content_blocks, list):
+                note_payload = payload.get('note')
+                if parsed and parsed['kind'] == 'journal' and not isinstance(content_blocks, list):
                     _send_json(ws, {'type': 'error', 'payload': {'code': 'contentBlocks_required'}})
+                    continue
+                if parsed and parsed['kind'] == 'note' and not isinstance(note_payload, dict):
+                    _send_json(ws, {'type': 'error', 'payload': {'code': 'note_required'}})
                     continue
                 edited_by = payload.get('editedBy') or {
                     'userId': actor.get('actorId'),
@@ -375,10 +518,18 @@ def collab_ws(ws):
                     doc = _documents.get(document_id)
                     if not doc:
                         continue
-                    doc['snapshot']['contentBlocks'] = content_blocks
+                    if parsed and parsed['kind'] == 'note':
+                        doc['snapshot']['note'] = note_payload
+                    else:
+                        doc['snapshot']['contentBlocks'] = content_blocks
                     doc['snapshot']['editedBy'] = edited_by
                     doc['snapshot']['updatedAt'] = _now()
                     doc['dirty'] = True
+                    next_payload = {'editedBy': edited_by}
+                    if parsed and parsed['kind'] == 'note':
+                        next_payload['note'] = note_payload
+                    else:
+                        next_payload['contentBlocks'] = content_blocks
                     event = {
                         'protocolVersion': 1,
                         'type': 'doc.update',
@@ -388,10 +539,7 @@ def collab_ws(ws):
                         'serverSeq': _next_server_seq(doc),
                         'sentAt': _now(),
                         'actor': actor,
-                        'payload': {
-                            'contentBlocks': content_blocks,
-                            'editedBy': edited_by,
-                        },
+                        'payload': next_payload,
                     }
                 _broadcast(document_id, event, exclude_session_id=session_id)
                 _schedule_save(document_id)
