@@ -3,6 +3,7 @@ Realtime collaboration routes.
 
 Phase 1 intentionally reuses the existing tables:
   - journal:{className}:{date} is persisted to class_journals.content_blocks
+  - note:{studentId}:{date} is persisted to contact_books teacher note columns
 
 Presence and connected sessions are in memory. With the current deployment
 (`gunicorn -k eventlet -w 1`) this gives a practical live editing layer without
@@ -65,6 +66,11 @@ def _parse_document_id(document_id):
         student_id, date = rest.rsplit(':', 1)
         if student_id and date:
             return {'kind': 'note', 'studentId': student_id, 'date': date}
+    if document_id.startswith('contact-book:'):
+        rest = document_id[len('contact-book:'):]
+        parts = rest.split(':')
+        if len(parts) >= 2 and parts[0] and parts[1]:
+            return {'kind': 'note', 'studentId': parts[0], 'date': parts[1]}
     return None
 
 
@@ -194,6 +200,51 @@ def _find_block(content_blocks, block_id):
 
 def _text_value(value):
     return value if isinstance(value, str) else ''
+
+
+def _html_to_text(value):
+    if not isinstance(value, str):
+        return ''
+    try:
+        from bs4 import BeautifulSoup
+        return BeautifulSoup(value, 'html.parser').get_text('\n').strip()
+    except Exception:
+        import re
+        text = re.sub(r'<[^>]+>', '', value)
+        return text.strip()
+
+
+def _note_payload_from_content_blocks(content_blocks, existing_note=None):
+    note = dict(existing_note or {})
+    note['blocks'] = content_blocks
+
+    text_parts = []
+    items_to_bring = []
+    returned_items = []
+    for block in content_blocks:
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get('type')
+        if block_type in ('plaintext', 'text'):
+            content = block.get('content')
+            text = _html_to_text(content) if block_type == 'text' else _text_value(content).strip()
+            if text:
+                text_parts.append(text)
+        elif block_type == 'bring' and isinstance(block.get('items'), list):
+            items_to_bring.extend([item for item in block.get('items') if isinstance(item, str) and item.strip()])
+        elif block_type == 'return' and isinstance(block.get('items'), list):
+            returned_items.extend([item for item in block.get('items') if isinstance(item, str) and item.strip()])
+
+    note['note'] = '\n'.join(text_parts)
+    if items_to_bring:
+        note['itemsToBring'] = items_to_bring
+    else:
+        note.pop('itemsToBring', None)
+    if returned_items:
+        note['returnedItems'] = returned_items
+    else:
+        note.pop('returnedItems', None)
+    return note
 
 
 def _clamp_int(value, lower, upper):
@@ -696,9 +747,6 @@ def collab_ws(ws):
                 if parsed and parsed['kind'] == 'journal' and not isinstance(content_blocks, list):
                     _send_json(ws, {'type': 'error', 'payload': {'code': 'contentBlocks_required'}})
                     continue
-                if parsed and parsed['kind'] == 'note' and not isinstance(note_payload, dict):
-                    _send_json(ws, {'type': 'error', 'payload': {'code': 'note_required'}})
-                    continue
                 edited_by = payload.get('editedBy') or {
                     'userId': actor.get('actorId'),
                     'cname': actor.get('displayName'),
@@ -709,6 +757,14 @@ def collab_ws(ws):
                     if not doc:
                         continue
                     if parsed and parsed['kind'] == 'note':
+                        if not isinstance(note_payload, dict) and isinstance(content_blocks, list):
+                            note_payload = _note_payload_from_content_blocks(
+                                content_blocks,
+                                doc['snapshot'].get('note') or {},
+                            )
+                        if not isinstance(note_payload, dict):
+                            _send_json(ws, {'type': 'error', 'payload': {'code': 'note_required'}})
+                            continue
                         doc['snapshot']['note'] = note_payload
                     else:
                         doc['snapshot']['contentBlocks'] = content_blocks
