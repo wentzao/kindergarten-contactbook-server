@@ -35,6 +35,31 @@ MAX_TEXT_HISTORY_PER_BLOCK = 500
 _state_lock = threading.RLock()
 _documents = {}
 
+STATUS_RANK = {
+    'draft': 0,
+    'notified': 1,
+    'read': 2,
+    'signed': 3,
+}
+
+
+def _canonical_contact_book_status(row):
+    if not row:
+        return 'draft'
+
+    inferred = 'draft'
+    if row['signed_at']:
+        inferred = 'signed'
+    elif row['read_at']:
+        inferred = 'read'
+    elif row['notified_at']:
+        inferred = 'notified'
+
+    explicit = (row['status'] or '').strip().lower()
+    if explicit not in STATUS_RANK:
+        return inferred
+    return explicit if STATUS_RANK[explicit] >= STATUS_RANK[inferred] else inferred
+
 
 def _now():
     return datetime.now().strftime('%Y-%m-%dT%H:%M:%S+08:00')
@@ -521,7 +546,7 @@ def _save_note_snapshot(parsed, snapshot):
     conn = data_service.get_db()
     try:
         row = conn.execute(
-            'SELECT id, status FROM contact_books WHERE student_id = ? AND date = ?',
+            'SELECT id, status, notified_at, read_at, signed_at FROM contact_books WHERE student_id = ? AND date = ?',
             (parsed['studentId'], parsed['date'])
         ).fetchone()
         teacher_json = json.dumps(note_data, ensure_ascii=False)
@@ -533,7 +558,7 @@ def _save_note_snapshot(parsed, snapshot):
             ''', (parsed['studentId'], parsed['date'], year, month, teacher_json,
                   items_to_bring, returned_items, survey_id, edited_by, now))
         else:
-            current_status = row['status']
+            current_status = _canonical_contact_book_status(row)
             new_status = current_status if current_status in ('notified', 'read', 'signed') else 'draft'
             conn.execute('''
                 UPDATE contact_books SET original_teacher = ?, items_to_bring = ?,

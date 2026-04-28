@@ -9,6 +9,31 @@ notification_bp = Blueprint('notifications', __name__)
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 data_service = DataService(DATA_DIR)
 
+STATUS_RANK = {
+    'draft': 0,
+    'notified': 1,
+    'read': 2,
+    'signed': 3,
+}
+
+
+def _canonical_contact_book_status(row):
+    if not row:
+        return 'draft'
+
+    inferred = 'draft'
+    if row['signed_at']:
+        inferred = 'signed'
+    elif row['read_at']:
+        inferred = 'read'
+    elif row['notified_at']:
+        inferred = 'notified'
+
+    explicit = (row['status'] or '').strip().lower()
+    if explicit not in STATUS_RANK:
+        return inferred
+    return explicit if STATUS_RANK[explicit] >= STATUS_RANK[inferred] else inferred
+
 
 def ensure_tables():
     """Create notification tables if they don't exist."""
@@ -379,6 +404,7 @@ def get_pending_notifications():
     data = request.json or {}
     student_ids = data.get('studentIds', [])
     date_filter = data.get('date')
+    class_name = data.get('className')
 
     if not student_ids or not isinstance(student_ids, list):
         return jsonify({'error': 'studentIds must be a non-empty array'}), 400
@@ -395,29 +421,35 @@ def get_pending_notifications():
 
         # Draft entries (teacher saved but not yet notified)
         query = f'''
-            SELECT student_id, date, status FROM contact_books
+            SELECT student_id, date, status, notified_at, read_at, signed_at FROM contact_books
             WHERE student_id IN ({placeholders})
-            AND status = 'draft'
         '''
         params = list(student_ids)
         if date_filter:
             query += ' AND date = ?'
             params.append(date_filter)
         rows = conn.execute(query, params).fetchall()
-        entries = [{'studentId': r['student_id'], 'date': r['date'], 'status': r['status']} for r in rows]
+        entries = [
+            {'studentId': r['student_id'], 'date': r['date'], 'status': _canonical_contact_book_status(r)}
+            for r in rows
+            if _canonical_contact_book_status(r) == 'draft'
+        ]
 
         # Already-notified student IDs (status in notified/read/signed)
         notified_query = f'''
-            SELECT student_id FROM contact_books
+            SELECT student_id, status, notified_at, read_at, signed_at FROM contact_books
             WHERE student_id IN ({placeholders})
-            AND status IN ('notified', 'read', 'signed')
         '''
         notified_params = list(student_ids)
         if date_filter:
             notified_query += ' AND date = ?'
             notified_params.append(date_filter)
         notified_rows = conn.execute(notified_query, notified_params).fetchall()
-        notified_student_ids = [r['student_id'] for r in notified_rows]
+        notified_student_ids = [
+            r['student_id']
+            for r in notified_rows
+            if _canonical_contact_book_status(r) in ('notified', 'read', 'signed')
+        ]
         notified_count = len(notified_student_ids)
 
         return jsonify({
@@ -456,6 +488,12 @@ def send_batch_notifications():
         student_names = data.get('studentNames', {})
         target_date = date_filter
 
+        if class_name and target_date:
+            conn.execute(
+                'UPDATE class_journals SET notified_at = COALESCE(notified_at, ?) WHERE class_name = ? AND date = ?',
+                (now, class_name, target_date)
+            )
+
         try:
             from services.send_notification import notify_parents_new_record
         except Exception:
@@ -465,11 +503,17 @@ def send_batch_notifications():
             if not target_date:
                 continue
             row = conn.execute(
-                'SELECT id, status FROM contact_books WHERE student_id = ? AND date = ?',
+                'SELECT id, status, notified_at, read_at, signed_at FROM contact_books WHERE student_id = ? AND date = ?',
                 (sid, target_date)
             ).fetchone()
 
-            if row and row['status'] in ('notified', 'read', 'signed'):
+            current_status = _canonical_contact_book_status(row)
+            if current_status in ('notified', 'read', 'signed'):
+                if row and row['status'] != current_status:
+                    conn.execute(
+                        'UPDATE contact_books SET status = ? WHERE id = ?',
+                        (current_status, row['id'])
+                    )
                 continue  # Already notified, skip
 
             if not row:
@@ -482,7 +526,7 @@ def send_batch_notifications():
             else:
                 # draft → notified
                 conn.execute(
-                    'UPDATE contact_books SET status = ?, notified_at = ? WHERE id = ?',
+                    'UPDATE contact_books SET status = ?, notified_at = COALESCE(notified_at, ?) WHERE id = ?',
                     ('notified', now, row['id'])
                 )
 
@@ -537,7 +581,11 @@ def get_checklist(class_name, date):
         students = []
         for sid in student_ids:
             row = conn.execute(
-                'SELECT original_teacher, status, notified_at FROM contact_books WHERE student_id = ? AND date = ?',
+                '''
+                SELECT original_teacher, status, notified_at, read_at, signed_at
+                FROM contact_books
+                WHERE student_id = ? AND date = ?
+                ''',
                 (sid, date)
             ).fetchone()
             teacher_data = json.loads(row['original_teacher']) if row and row['original_teacher'] else None
@@ -554,7 +602,7 @@ def get_checklist(class_name, date):
                 'name': student_names.get(sid, sid),
                 'hasNotes': has_notes,
                 'hasHealth': has_health,
-                'status': row['status'] if row else None,
+                'status': _canonical_contact_book_status(row) if row else None,
                 'notifiedAt': row['notified_at'] if row else None,
             })
 
@@ -626,4 +674,3 @@ def get_notification_logs():
     finally:
         if conn:
             conn.close()
-

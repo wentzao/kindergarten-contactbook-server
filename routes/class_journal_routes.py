@@ -9,6 +9,31 @@ from services.data_service import DataService
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 data_service = DataService(DATA_DIR)
 
+STATUS_RANK = {
+    'draft': 0,
+    'notified': 1,
+    'read': 2,
+    'signed': 3,
+}
+
+
+def _canonical_contact_book_status(row):
+    if not row:
+        return 'draft'
+
+    inferred = 'draft'
+    if row['signed_at']:
+        inferred = 'signed'
+    elif row['read_at']:
+        inferred = 'read'
+    elif row['notified_at']:
+        inferred = 'notified'
+
+    explicit = (row['status'] or '').strip().lower()
+    if explicit not in STATUS_RANK:
+        return inferred
+    return explicit if STATUS_RANK[explicit] >= STATUS_RANK[inferred] else inferred
+
 
 @journal_bp.route('/<class_name>/<date>', methods=['GET'])
 def get_journal(class_name, date):
@@ -102,7 +127,7 @@ def publish_journal(class_name, date):
     try:
         for sid in student_ids:
             row = conn.execute(
-                'SELECT id, status FROM contact_books WHERE student_id = ? AND date = ?',
+                'SELECT id, status, notified_at, read_at, signed_at FROM contact_books WHERE student_id = ? AND date = ?',
                 (sid, date)
             ).fetchone()
             if not row:
@@ -111,11 +136,18 @@ def publish_journal(class_name, date):
                     INSERT INTO contact_books (student_id, date, year, month, status, notified_at)
                     VALUES (?, ?, ?, ?, 'notified', ?)
                 ''', (sid, date, year, month, now))
-            elif row['status'] == 'draft':
-                conn.execute(
-                    'UPDATE contact_books SET status = ?, notified_at = ? WHERE id = ?',
-                    ('notified', now, row['id'])
-                )
+            else:
+                current_status = _canonical_contact_book_status(row)
+                if current_status == 'draft':
+                    conn.execute(
+                        'UPDATE contact_books SET status = ?, notified_at = ? WHERE id = ?',
+                        ('notified', now, row['id'])
+                    )
+                elif row['status'] != current_status:
+                    conn.execute(
+                        'UPDATE contact_books SET status = ? WHERE id = ?',
+                        (current_status, row['id'])
+                    )
 
         # Record notification log
         conn.execute('''
@@ -157,12 +189,12 @@ def get_journal_for_student(student_id, date):
     conn = data_service.get_db()
     try:
         row = conn.execute(
-            'SELECT status FROM contact_books WHERE student_id = ? AND date = ?',
+            'SELECT status, notified_at, read_at, signed_at FROM contact_books WHERE student_id = ? AND date = ?',
             (student_id, date)
         ).fetchone()
     finally:
         conn.close()
-    student_notified = row and row['status'] in ('notified', 'read', 'signed')
+    student_notified = _canonical_contact_book_status(row) in ('notified', 'read', 'signed')
 
     journal = data_service.get_class_journal(class_name, date)
     if not journal or not student_notified:

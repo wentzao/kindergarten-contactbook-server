@@ -999,13 +999,27 @@ def get_class_date_teacher(class_name, date):
         # Since contact_books doesn't store class_name, fetch ALL records for this date
         # and let the frontend filter by its student list.
         rows = conn.execute(
-            'SELECT student_id, original_teacher, items_to_bring, returned_items, survey_id FROM contact_books WHERE date = ?',
+            '''
+            SELECT student_id, original_teacher, items_to_bring, returned_items,
+                   survey_id, status, notified_at, read_at, signed_at
+            FROM contact_books
+            WHERE date = ?
+            ''',
             (date,)
         ).fetchall()
 
         result = {}
         for r in rows:
             teacher_data = load_json(r['original_teacher']) or {}
+            teacher_data['status'] = _canonical_contact_book_status(
+                r['status'],
+                r['notified_at'],
+                r['read_at'],
+                r['signed_at'],
+            )
+            teacher_data['notifiedAt'] = r['notified_at']
+            teacher_data['readAt'] = r['read_at']
+            teacher_data['signedAt'] = r['signed_at']
             items = load_json(r['items_to_bring'])
             if items and 'items' in items:
                 teacher_data['itemsToBring'] = items['items']
