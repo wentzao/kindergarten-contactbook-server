@@ -404,7 +404,6 @@ def get_pending_notifications():
     data = request.json or {}
     student_ids = data.get('studentIds', [])
     date_filter = data.get('date')
-    class_name = data.get('className')
 
     if not student_ids or not isinstance(student_ids, list):
         return jsonify({'error': 'studentIds must be a non-empty array'}), 400
@@ -474,6 +473,7 @@ def send_batch_notifications():
     data = request.json or {}
     student_ids = data.get('studentIds', [])
     date_filter = data.get('date')
+    class_name = data.get('className')
 
     if not student_ids:
         return jsonify({'error': 'studentIds is required'}), 400
