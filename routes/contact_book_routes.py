@@ -60,7 +60,48 @@ contact_book_bp = Blueprint('contact_book', __name__)
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 data_service = DataService(DATA_DIR)
 
-# Auto-migrate: add edited_by column if missing
+STATUS_DRAFT = 'draft'
+STATUS_NOTIFIED = 'notified'
+STATUS_READ = 'read'
+STATUS_SIGNED = 'signed'
+VALID_CONTACT_BOOK_STATUSES = {
+    STATUS_DRAFT,
+    STATUS_NOTIFIED,
+    STATUS_READ,
+    STATUS_SIGNED,
+}
+STATUS_RANK = {
+    STATUS_DRAFT: 0,
+    STATUS_NOTIFIED: 1,
+    STATUS_READ: 2,
+    STATUS_SIGNED: 3,
+}
+
+
+def _normalize_status_value(value):
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    return normalized if normalized in VALID_CONTACT_BOOK_STATUSES else None
+
+
+def _canonical_contact_book_status(status_value, notified_at=None, read_at=None, signed_at=None):
+    inferred = STATUS_DRAFT
+    if signed_at:
+        inferred = STATUS_SIGNED
+    elif read_at:
+        inferred = STATUS_READ
+    elif notified_at:
+        inferred = STATUS_NOTIFIED
+
+    explicit = _normalize_status_value(status_value)
+    if explicit is None:
+        return inferred
+
+    return explicit if STATUS_RANK[explicit] >= STATUS_RANK[inferred] else inferred
+
+
+# Auto-migrate: add edited_by column if missing + canonicalize status data
 def _auto_migrate():
     conn = None
     try:
@@ -70,6 +111,27 @@ def _auto_migrate():
             conn.execute('ALTER TABLE contact_books ADD COLUMN edited_by TEXT')
             conn.commit()
             print('[Migration] Added edited_by column to contact_books')
+
+        rows = conn.execute(
+            'SELECT id, status, notified_at, read_at, signed_at FROM contact_books'
+        ).fetchall()
+        updated = 0
+        for row in rows:
+            canonical = _canonical_contact_book_status(
+                row['status'],
+                row['notified_at'],
+                row['read_at'],
+                row['signed_at'],
+            )
+            if row['status'] != canonical:
+                conn.execute(
+                    'UPDATE contact_books SET status = ? WHERE id = ?',
+                    (canonical, row['id'])
+                )
+                updated += 1
+        if updated > 0:
+            conn.commit()
+            print(f'[Migration] Canonicalized contact_books.status rows: {updated}')
     except Exception as e:
         print(f'[Migration] Error: {e}')
     finally:
@@ -143,6 +205,12 @@ def load_json(val):
 
 DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六']
 
+
+def _is_truthy_flag(value):
+    if value is None:
+        return False
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+
 def _resolve_teacher_name(user_id, profiles):
     """Resolve userId to {cname, ename} from teacher_profiles cache."""
     if not user_id or not profiles:
@@ -174,7 +242,12 @@ def format_record(r, version='original', teacher_profiles=None):
         except:
             stored_dow = ''
 
-    status = r['status']
+    status = _canonical_contact_book_status(
+        r['status'],
+        r['notified_at'],
+        r['read_at'],
+        r['signed_at'],
+    )
 
     # Resolve editedBy userId → cname/ename (cache overrides stored names if available)
     edited_by_raw = load_json(r['edited_by'])
@@ -233,7 +306,30 @@ def get_available_months(student_id):
     """Get list of available months for a student's contact book"""
     conn = data_service.get_db()
     try:
-        rows = conn.execute('SELECT DISTINCT year, month FROM contact_books WHERE student_id = ? ORDER BY year ASC, month ASC', (student_id,)).fetchall()
+        include_unpublished = _is_truthy_flag(request.args.get('includeUnpublished'))
+        if include_unpublished:
+            rows = conn.execute(
+                'SELECT DISTINCT year, month FROM contact_books WHERE student_id = ? ORDER BY year ASC, month ASC',
+                (student_id,)
+            ).fetchall()
+        else:
+            # Parent-safe default:
+            # only expose months with records that have been published/read/signed.
+            rows = conn.execute(
+                '''
+                SELECT DISTINCT year, month
+                FROM contact_books
+                WHERE student_id = ?
+                  AND (
+                    status IN ('notified', 'read', 'signed')
+                    OR notified_at IS NOT NULL
+                    OR read_at IS NOT NULL
+                    OR signed_at IS NOT NULL
+                  )
+                ORDER BY year ASC, month ASC
+                ''',
+                (student_id,)
+            ).fetchall()
         months = [f"{r['year']}-{r['month']:02d}" for r in rows]
         return jsonify(months), 200
     finally:
@@ -367,8 +463,17 @@ def update_teacher_entry(student_id, date):
                   items_to_bring, returned_items, attached_items, survey_id, edited_by, datetime.now().isoformat()))
         else:
             # Don't downgrade status if already notified/read/signed
-            current = conn.execute('SELECT status FROM contact_books WHERE student_id = ? AND date = ?', (student_id, date)).fetchone()
-            new_status = current['status'] if current and current['status'] in ('notified', 'read', 'signed') else 'draft'
+            current = conn.execute(
+                'SELECT status, notified_at, read_at, signed_at FROM contact_books WHERE student_id = ? AND date = ?',
+                (student_id, date)
+            ).fetchone()
+            current_status = _canonical_contact_book_status(
+                current['status'] if current else None,
+                current['notified_at'] if current else None,
+                current['read_at'] if current else None,
+                current['signed_at'] if current else None,
+            )
+            new_status = current_status if current_status in (STATUS_NOTIFIED, STATUS_READ, STATUS_SIGNED) else STATUS_DRAFT
             conn.execute('''UPDATE contact_books SET original_teacher = ?, items_to_bring = ?,
                 returned_items = ?, attached_items = ?, survey_id = ?, edited_by = ?, status = ?, last_modified = ?
                 WHERE student_id = ? AND date = ?''',
@@ -392,7 +497,29 @@ def get_latest_records(student_id):
     conn = data_service.get_db()
     try:
         profiles = _load_teacher_profiles(conn)
-        rows = conn.execute('SELECT * FROM contact_books WHERE student_id = ? ORDER BY date DESC LIMIT ?', (student_id, limit)).fetchall()
+        include_unpublished = _is_truthy_flag(request.args.get('includeUnpublished'))
+        if include_unpublished:
+            rows = conn.execute(
+                'SELECT * FROM contact_books WHERE student_id = ? ORDER BY date DESC LIMIT ?',
+                (student_id, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                '''
+                SELECT *
+                FROM contact_books
+                WHERE student_id = ?
+                  AND (
+                    status IN ('notified', 'read', 'signed')
+                    OR notified_at IS NOT NULL
+                    OR read_at IS NOT NULL
+                    OR signed_at IS NOT NULL
+                  )
+                ORDER BY date DESC
+                LIMIT ?
+                ''',
+                (student_id, limit)
+            ).fetchall()
         records = [format_record(r, 'original', profiles) for r in rows]
         return jsonify(records), 200
     finally:
@@ -403,15 +530,24 @@ def mark_as_read(student_id, date):
     data = request.json or {}
     conn = data_service.get_db()
     try:
-        row = conn.execute('SELECT status FROM contact_books WHERE student_id = ? AND date = ?', (student_id, date)).fetchone()
+        row = conn.execute(
+            'SELECT status, notified_at, read_at, signed_at FROM contact_books WHERE student_id = ? AND date = ?',
+            (student_id, date)
+        ).fetchone()
         if not row:
             return jsonify({'error': 'Record not found'}), 404
         
         status_changed = False
-        if row['status'] == 'notified':
+        current_status = _canonical_contact_book_status(
+            row['status'],
+            row['notified_at'],
+            row['read_at'],
+            row['signed_at'],
+        )
+        if current_status == STATUS_NOTIFIED:
             read_at = data.get('readAt') or datetime.now().isoformat()
             conn.execute('UPDATE contact_books SET status = ?, read_at = ?, last_modified = ? WHERE student_id = ? AND date = ?',
-                         ('read', read_at, datetime.now().isoformat(), student_id, date))
+                         (STATUS_READ, read_at, datetime.now().isoformat(), student_id, date))
             conn.commit()
             status_changed = True
         
@@ -781,7 +917,7 @@ def batch_save_teacher(class_name, date):
             teacher_json = json.dumps(note_data, ensure_ascii=False)
 
             row = conn.execute(
-                'SELECT id, status FROM contact_books WHERE student_id = ? AND date = ?',
+                'SELECT id, status, notified_at, read_at, signed_at FROM contact_books WHERE student_id = ? AND date = ?',
                 (student_id, date)
             ).fetchone()
 
@@ -794,8 +930,13 @@ def batch_save_teacher(class_name, date):
                       items_to_bring, returned_items, survey_id, edited_by, datetime.now().isoformat()))
             else:
                 # Don't downgrade status if already notified/read/signed
-                current_status = row['status']
-                new_status = current_status if current_status in ('notified', 'read', 'signed') else 'draft'
+                current_status = _canonical_contact_book_status(
+                    row['status'],
+                    row['notified_at'],
+                    row['read_at'],
+                    row['signed_at'],
+                )
+                new_status = current_status if current_status in (STATUS_NOTIFIED, STATUS_READ, STATUS_SIGNED) else STATUS_DRAFT
                 conn.execute('''
                     UPDATE contact_books SET original_teacher = ?, items_to_bring = ?,
                         returned_items = ?, survey_id = ?, edited_by = ?, status = ?, last_modified = ?
