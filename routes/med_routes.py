@@ -18,6 +18,21 @@ def submit_med_request():
     data = request.json
     if not data or 'childId' not in data:
         return jsonify({'error': 'Missing childId'}), 400
-    
+
     saved_record = data_service.save_student_record(data['childId'], 'meds', data)
     return jsonify(saved_record), 201
+
+
+@med_bp.route('/<med_id>', methods=['DELETE'])
+def delete_med_request(med_id):
+    try:
+        success = data_service.delete_student_record(med_id, 'meds')
+        if success:
+            return jsonify({'status': 'deleted'}), 200
+        else:
+            return jsonify({'error': 'Record not found'}), 404
+    except Exception as e:
+        print(f"[Meds] DELETE error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
