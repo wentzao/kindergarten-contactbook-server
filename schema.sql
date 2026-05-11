@@ -59,6 +59,7 @@ CREATE TABLE contact_books (
     comments TEXT,
     survey_id VARCHAR(50),
     redacted TEXT,
+    parent_signature_url TEXT,
     last_modified VARCHAR(50),
     UNIQUE(student_id, date)
 );

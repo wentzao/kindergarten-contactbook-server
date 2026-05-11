@@ -271,6 +271,12 @@ def format_record(r, version='original', teacher_profiles=None):
                     c['cname'] = resolved['cname']
                     c['ename'] = resolved['ename']
 
+    # parent_signature_url may not exist on old rows / older DB schemas — guard.
+    try:
+        parent_signature_url = r['parent_signature_url']
+    except (IndexError, KeyError):
+        parent_signature_url = None
+
     rec = {
         'date': date_str,
         'dayOfWeek': stored_dow,
@@ -278,6 +284,7 @@ def format_record(r, version='original', teacher_profiles=None):
         'readAt': r['read_at'],
         'signedAt': r['signed_at'],
         'notifiedAt': r['notified_at'],
+        'parentSignatureUrl': parent_signature_url,
         'itemsToBring': load_json(r['items_to_bring']),
         'returnedItems': load_json(r['returned_items']) or [],
         'attachedItems': load_json(r['attached_items']) or [],
@@ -574,22 +581,28 @@ def mark_as_signed(student_id, date):
         row = conn.execute('SELECT original_parent FROM contact_books WHERE student_id = ? AND date = ?', (student_id, date)).fetchone()
         if not row:
             return jsonify({'error': 'Record not found'}), 404
-        
+
         signed_at = data.get('signedAt') or datetime.now().isoformat()
-        
+        signature_url = data.get('signatureUrl')  # WebP URL from image server; may be None for legacy callers
+
         # Update parent note if provided
-        new_parent_data = None
         if data.get('note'):
             parent_obj = load_json(row['original_parent']) or {}
             parent_obj['note'] = data['note']
             parent_obj['updatedAt'] = signed_at
             new_parent_data = json.dumps(parent_obj, ensure_ascii=False)
-            
-            conn.execute('UPDATE contact_books SET status = ?, signed_at = ?, original_parent = ?, last_modified = ? WHERE student_id = ? AND date = ?',
-                         ('signed', signed_at, new_parent_data, datetime.now().isoformat(), student_id, date))
+
+            conn.execute(
+                'UPDATE contact_books SET status = ?, signed_at = ?, original_parent = ?, parent_signature_url = ?, last_modified = ? '
+                'WHERE student_id = ? AND date = ?',
+                ('signed', signed_at, new_parent_data, signature_url, datetime.now().isoformat(), student_id, date),
+            )
         else:
-            conn.execute('UPDATE contact_books SET status = ?, signed_at = ?, last_modified = ? WHERE student_id = ? AND date = ?',
-                         ('signed', signed_at, datetime.now().isoformat(), student_id, date))
+            conn.execute(
+                'UPDATE contact_books SET status = ?, signed_at = ?, parent_signature_url = ?, last_modified = ? '
+                'WHERE student_id = ? AND date = ?',
+                ('signed', signed_at, signature_url, datetime.now().isoformat(), student_id, date),
+            )
         conn.commit()
         
         # Notify teachers via silent FCM push (no toast shown)

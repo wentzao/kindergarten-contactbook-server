@@ -47,6 +47,14 @@ class DataService:
             except sqlite3.OperationalError:
                 # Column already exists — expected on subsequent startups.
                 pass
+
+            # parent_signature_url for contact_books (聯絡簿每日簽收的家長簽名)
+            try:
+                conn.execute('ALTER TABLE contact_books ADD COLUMN parent_signature_url TEXT')
+                conn.commit()
+                print('[DATA_SERVICE] Added parent_signature_url column to contact_books')
+            except sqlite3.OperationalError:
+                pass
         finally:
             conn.close()
 
