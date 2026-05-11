@@ -11,7 +11,7 @@ app = Flask(__name__)
 CORS(app, resources={r"/api/*": {
     "origins": ["https://teacher-contact-book.wentzao.com", "https://newsroom.wentzao.com", "http://localhost:5173", "http://localhost:4173", "http://localhost:5500", "http://127.0.0.1:5500"],
     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    "allow_headers": ["Content-Type", "Authorization"],
+    "allow_headers": ["Content-Type", "Authorization", "X-Admin-Token"],
     "supports_credentials": True
 }})
 # Fix headers for Nginx proxy
@@ -35,6 +35,7 @@ from routes.class_journal_routes import journal_bp
 from routes.lock_routes import lock_bp
 from routes.parent_routes import parent_bp
 from routes.collab_routes import collab_bp, collab_sock
+from routes.admin_routes import admin_bp
 
 app.register_blueprint(leave_bp, url_prefix='/api/leave')
 app.register_blueprint(med_bp, url_prefix='/api/meds')
@@ -48,6 +49,7 @@ app.register_blueprint(journal_bp, url_prefix='/api/class-journal')
 app.register_blueprint(lock_bp, url_prefix='/api/locks')
 app.register_blueprint(parent_bp, url_prefix='/api/parents')
 app.register_blueprint(collab_bp, url_prefix='/api/collab')
+app.register_blueprint(admin_bp, url_prefix='/api/admin')
 collab_sock.init_app(app)
 
 # Drop legacy tables that are no longer used by the application
