@@ -41,10 +41,16 @@ import json
 
 WEB_WENTZAO_TEACHER_AUTH_API = 'https://web.wentzao.com/api/get_teacher_for_auth'
 
+def _is_truthy(value):
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+
 @student_bp.route('/classes', methods=['GET'])
 def get_classes():
     semester = request.args.get('semester', get_current_semester())
     user_id = request.args.get('userId')
+    show_all_data_raw = request.args.get('showAllData')
+    has_explicit_data_scope = show_all_data_raw is not None
+    show_all_data = _is_truthy(show_all_data_raw)
     
     if not user_id:
         return jsonify({'error': 'Missing userId'}), 400
@@ -65,6 +71,11 @@ def get_classes():
         return jsonify({'error': f'Failed to verify teacher: {str(e)}'}), 502
         
     is_admin = teacher.get('isAdmin', False)
+    # Keep legacy web behavior when no scope is provided, but let mobile clients
+    # explicitly request managed-class mode for admin test accounts.
+    include_all_classes = is_admin and (
+        show_all_data if has_explicit_data_scope else True
+    )
     teaching_classes = [c.get('className') for c in teacher.get('teachingClasses', {}).get(semester, [])]
     
     url = "https://web.wentzao.com/api/get_class_student_info"
@@ -107,7 +118,9 @@ def get_classes():
             else:
                 continue
                 
-            if is_admin or class_name in teaching_classes:
+            # isAdmin only marks permission. showAllData must explicitly opt in
+            # so admins can still test the same managed-class scope as teachers.
+            if include_all_classes or class_name in teaching_classes:
                 student_obj = {
                     "uid": uid,
                     "studentId": student_id,
@@ -130,7 +143,8 @@ def get_classes():
             'semester': semester,
             'classes': filtered_classes,
             'students': filtered_students,
-            'isAdmin': is_admin
+            'isAdmin': is_admin,
+            'dataScope': 'allClasses' if include_all_classes else 'managedClasses'
         }), 200
         
     except requests.exceptions.RequestException as e:
