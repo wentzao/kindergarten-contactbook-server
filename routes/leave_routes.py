@@ -19,12 +19,20 @@ def get_today_leaves():
             WHERE start_date <= ? AND end_date >= ?
             ORDER BY child_id
         ''', (today_str, today_str)).fetchall()
-        records = [{
-            'id': r['id'], 'childId': r['child_id'], 'type': r['type'],
-            'startDate': r['start_date'], 'endDate': r['end_date'],
-            'reason': r['reason'], 'createdBy': r['created_by'],
-            'createdAt': r['created_at'],
-        } for r in rows]
+        records = []
+        for r in rows:
+            rec = {
+                'id': r['id'], 'childId': r['child_id'], 'type': r['type'],
+                'startDate': r['start_date'], 'endDate': r['end_date'],
+                'reason': r['reason'], 'createdBy': r['created_by'],
+                'createdAt': r['created_at'],
+            }
+            try:
+                if r['signature_url']:
+                    rec['signatureUrl'] = r['signature_url']
+            except (IndexError, KeyError):
+                pass
+            records.append(rec)
         return jsonify(records)
     finally:
         conn.close()
@@ -46,12 +54,20 @@ def get_month_leaves():
             WHERE start_date <= ? AND end_date >= ?
             ORDER BY start_date
         ''', (end, start)).fetchall()
-        records = [{
-            'id': r['id'], 'childId': r['child_id'], 'type': r['type'],
-            'startDate': r['start_date'], 'endDate': r['end_date'],
-            'reason': r['reason'], 'createdBy': r['created_by'],
-            'createdAt': r['created_at'],
-        } for r in rows]
+        records = []
+        for r in rows:
+            rec = {
+                'id': r['id'], 'childId': r['child_id'], 'type': r['type'],
+                'startDate': r['start_date'], 'endDate': r['end_date'],
+                'reason': r['reason'], 'createdBy': r['created_by'],
+                'createdAt': r['created_at'],
+            }
+            try:
+                if r['signature_url']:
+                    rec['signatureUrl'] = r['signature_url']
+            except (IndexError, KeyError):
+                pass
+            records.append(rec)
         return jsonify(records)
     finally:
         conn.close()

@@ -72,6 +72,7 @@ CREATE TABLE leave_records (
     start_date VARCHAR(20),
     end_date VARCHAR(20),
     reason TEXT,
+    signature_url TEXT,
     created_by VARCHAR(100),
     created_at VARCHAR(50)
 );

@@ -22,12 +22,33 @@ class DataService:
     def __init__(self, data_dir):
         # We don't use data_dir much anymore, but keep it for config
         self.db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'kindergarten.db')
+        self._ensure_schema()
 
     def get_db(self):
         # timeout=30: Python-level retry for up to 30 seconds on lock
         conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _ensure_schema(self):
+        """Defensive schema migration — runs every startup, idempotent.
+
+        We use this instead of a versioned migration system because the deltas
+        are small and we want zero manual steps on deploy. Each ALTER is
+        wrapped in try/except so re-runs are safe.
+        """
+        conn = sqlite3.connect(self.db_path, timeout=30)
+        try:
+            # signature_url for leave_records (added when 家長簽名 feature shipped)
+            try:
+                conn.execute('ALTER TABLE leave_records ADD COLUMN signature_url TEXT')
+                conn.commit()
+                print('[DATA_SERVICE] Added signature_url column to leave_records')
+            except sqlite3.OperationalError:
+                # Column already exists — expected on subsequent startups.
+                pass
+        finally:
+            conn.close()
 
     def _translate_type(self, data_type, type_value):
         """Translate type value from English to Chinese"""
@@ -55,12 +76,12 @@ class DataService:
         try:
             if data_type == 'leave':
                 conn.execute('''
-                    INSERT INTO leave_records (id, child_id, type, start_date, end_date, reason, created_by, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO leave_records (id, child_id, type, start_date, end_date, reason, signature_url, created_by, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     record.get('id'), child_id, record.get('type'), record.get('startDate'),
-                    record.get('endDate'), record.get('reason'), record.get('createdBy'),
-                    record.get('createdAt')
+                    record.get('endDate'), record.get('reason'), record.get('signatureUrl'),
+                    record.get('createdBy'), record.get('createdAt')
                 ))
             elif data_type == 'meds':
                 med_details = {k: v for k, v in record.items() if k not in 
@@ -88,11 +109,18 @@ class DataService:
                 rows = conn.execute('SELECT * FROM leave_records WHERE child_id = ? ORDER BY created_at DESC', (child_id,)).fetchall()
                 records = []
                 for r in rows:
-                    records.append({
+                    rec = {
                         'id': r['id'], 'childId': r['child_id'], 'type': r['type'],
                         'startDate': r['start_date'], 'endDate': r['end_date'],
                         'reason': r['reason'], 'createdBy': r['created_by'], 'createdAt': r['created_at']
-                    })
+                    }
+                    # signature_url 在舊資料上可能不存在 — 用 try/except 保護以免 row 沒這個 key
+                    try:
+                        if r['signature_url']:
+                            rec['signatureUrl'] = r['signature_url']
+                    except (IndexError, KeyError):
+                        pass
+                    records.append(rec)
                 return records
             elif data_type == 'meds':
                 rows = conn.execute('SELECT * FROM med_records WHERE child_id = ? ORDER BY created_at DESC', (child_id,)).fetchall()
