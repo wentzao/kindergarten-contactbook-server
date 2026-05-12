@@ -346,10 +346,34 @@ def get_available_months(student_id):
 def get_contact_book(student_id, year, month):
     version = request.args.get('version', 'original')
     class_name = request.args.get('className')
+    # Safe-by-default: drafts (status='draft' with no notified/read/signed timestamps)
+    # are excluded unless the caller explicitly opts in. Teacher web passes
+    # ?includeUnpublished=true; parent app does not.
+    include_unpublished = _is_truthy_flag(request.args.get('includeUnpublished'))
     conn = data_service.get_db()
     try:
         profiles = _load_teacher_profiles(conn)
-        rows = conn.execute('SELECT * FROM contact_books WHERE student_id = ? AND year = ? AND month = ? ORDER BY date ASC', (student_id, year, month)).fetchall()
+        if include_unpublished:
+            rows = conn.execute(
+                'SELECT * FROM contact_books WHERE student_id = ? AND year = ? AND month = ? ORDER BY date ASC',
+                (student_id, year, month),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                '''
+                SELECT *
+                FROM contact_books
+                WHERE student_id = ? AND year = ? AND month = ?
+                  AND (
+                    status IN ('notified', 'read', 'signed')
+                    OR notified_at IS NOT NULL
+                    OR read_at IS NOT NULL
+                    OR signed_at IS NOT NULL
+                  )
+                ORDER BY date ASC
+                ''',
+                (student_id, year, month),
+            ).fetchall()
         if not rows:
             return jsonify({'studentId': student_id, 'year': year, 'month': month, 'records': []}), 200
 
