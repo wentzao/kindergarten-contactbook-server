@@ -140,10 +140,38 @@ CREATE TABLE push_tokens (
     push_token VARCHAR(200) NOT NULL,
     device_name VARCHAR(100),
     role VARCHAR(20) DEFAULT 'parent',
+    provider VARCHAR(20) DEFAULT 'fcm',
+    platform VARCHAR(20),
+    environment VARCHAR(20),
+    bundle_id VARCHAR(200),
+    student_ids TEXT,
     created_at VARCHAR(50),
     updated_at VARCHAR(50),
     UNIQUE(user_id, push_token)
 );
+
+DROP TABLE IF EXISTS teacher_class_memberships;
+CREATE TABLE teacher_class_memberships (
+    user_id VARCHAR(100) NOT NULL,
+    semester VARCHAR(50) NOT NULL,
+    class_name VARCHAR(100) NOT NULL,
+    is_admin BOOLEAN DEFAULT 0,
+    updated_at VARCHAR(50),
+    PRIMARY KEY (user_id, semester, class_name)
+);
+CREATE INDEX idx_tcm_class_semester ON teacher_class_memberships(class_name, semester);
+
+DROP TABLE IF EXISTS student_class_cache;
+CREATE TABLE student_class_cache (
+    student_id VARCHAR(50) NOT NULL,
+    semester VARCHAR(50) NOT NULL,
+    class_name VARCHAR(100) NOT NULL,
+    chinese_name VARCHAR(100),
+    english_name VARCHAR(100),
+    updated_at VARCHAR(50),
+    PRIMARY KEY (student_id, semester)
+);
+CREATE INDEX idx_scc_class_semester ON student_class_cache(class_name, semester);
 
 DROP TABLE IF EXISTS notification_preferences;
 CREATE TABLE notification_preferences (

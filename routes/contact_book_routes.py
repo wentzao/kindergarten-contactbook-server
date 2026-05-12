@@ -989,7 +989,7 @@ def batch_save_teacher(class_name, date):
             saved_ids = [sid for sid in students_data.keys() if sid not in conflicts]
             def _notify():
                 try:
-                    from services.send_notification import send_to_role
+                    from services.send_notification import send_to_teacher_user_ids
                     notify_data = {
                         'type': 'data_updated',
                         'dataType': 'student_notes',
@@ -997,8 +997,21 @@ def batch_save_teacher(class_name, date):
                         'date': date,
                         'studentIds': json.dumps(saved_ids),
                     }
-                    send_to_role(data_service, 'teacher', '', '', notify_data)
-                    send_to_role(data_service, 'admin', '', '', notify_data)
+                    notify_conn = data_service.get_db()
+                    try:
+                        rows = notify_conn.execute(
+                            'SELECT DISTINCT user_id FROM teacher_class_memberships WHERE class_name = ?',
+                            (class_name,)
+                        ).fetchall()
+                    finally:
+                        notify_conn.close()
+                    send_to_teacher_user_ids(
+                        data_service,
+                        [r['user_id'] for r in rows],
+                        '',
+                        '',
+                        notify_data
+                    )
                 except Exception as e:
                     print(f'[ContactBook] data_updated notification error: {e}')
             threading.Thread(target=_notify, daemon=True).start()

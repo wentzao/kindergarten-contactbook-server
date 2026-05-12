@@ -54,10 +54,38 @@ def ensure_tables():
                 push_token VARCHAR(200) NOT NULL,
                 device_name VARCHAR(100),
                 role VARCHAR(20) DEFAULT 'parent',
+                provider VARCHAR(20) DEFAULT 'fcm',
+                platform VARCHAR(20),
+                environment VARCHAR(20),
+                bundle_id VARCHAR(200),
+                student_ids TEXT,
                 created_at VARCHAR(50),
                 updated_at VARCHAR(50),
                 UNIQUE(user_id, push_token)
             );
+
+            CREATE TABLE IF NOT EXISTS teacher_class_memberships (
+                user_id VARCHAR(100) NOT NULL,
+                semester VARCHAR(50) NOT NULL,
+                class_name VARCHAR(100) NOT NULL,
+                is_admin BOOLEAN DEFAULT 0,
+                updated_at VARCHAR(50),
+                PRIMARY KEY (user_id, semester, class_name)
+            );
+            CREATE INDEX IF NOT EXISTS idx_tcm_class_semester
+                ON teacher_class_memberships(class_name, semester);
+
+            CREATE TABLE IF NOT EXISTS student_class_cache (
+                student_id VARCHAR(50) NOT NULL,
+                semester VARCHAR(50) NOT NULL,
+                class_name VARCHAR(100) NOT NULL,
+                chinese_name VARCHAR(100),
+                english_name VARCHAR(100),
+                updated_at VARCHAR(50),
+                PRIMARY KEY (student_id, semester)
+            );
+            CREATE INDEX IF NOT EXISTS idx_scc_class_semester
+                ON student_class_cache(class_name, semester);
 
             CREATE TABLE IF NOT EXISTS notification_preferences (
                 user_id VARCHAR(100) PRIMARY KEY,
@@ -96,6 +124,18 @@ def ensure_tables():
             conn.commit()
         except Exception:
             pass  # Column already exists
+        # Migration: add push provider metadata for native APNs and web FCM/Expo coexistence
+        for ddl in (
+            "ALTER TABLE push_tokens ADD COLUMN provider VARCHAR(20) DEFAULT 'fcm'",
+            "ALTER TABLE push_tokens ADD COLUMN platform VARCHAR(20)",
+            "ALTER TABLE push_tokens ADD COLUMN environment VARCHAR(20)",
+            "ALTER TABLE push_tokens ADD COLUMN bundle_id VARCHAR(200)",
+        ):
+            try:
+                conn.execute(ddl)
+                conn.commit()
+            except Exception:
+                pass  # Column already exists
         # Migration: add notified_at column to contact_books for batch notification tracking
         try:
             conn.execute('ALTER TABLE contact_books ADD COLUMN notified_at VARCHAR(50)')
@@ -124,7 +164,13 @@ ensure_tables()
 
 @notification_bp.route('/push-token', methods=['POST'])
 def register_push_token():
-    """Register a FCM push token. Teachers: 1 token only. Parents: multi-device."""
+    """Register a push token.
+
+    Web/parent clients can keep using FCM or Expo tokens. Native teacher apps
+    register APNs tokens with provider='apns'. Teachers/admins keep one token per
+    provider/platform/bundle/environment so iOS app registration does not remove
+    an existing web FCM token.
+    """
     data = request.json
     if not data:
         return jsonify({'error': 'No data provided'}), 400
@@ -137,29 +183,59 @@ def register_push_token():
 
     device_name = data.get('deviceName', 'Unknown')
     role = data.get('role', 'parent')
+    provider = (data.get('provider') or '').strip().lower()
+    if not provider:
+        provider = 'expo' if str(push_token).startswith('ExponentPushToken[') else 'fcm'
+    platform = (data.get('platform') or '').strip().lower() or None
+    environment = (data.get('environment') or '').strip().lower() or None
+    bundle_id = (data.get('bundleId') or data.get('bundleID') or '').strip() or None
     student_ids = json.dumps(data.get('studentIds', []), ensure_ascii=False) if data.get('studentIds') else None
     now = datetime.now().isoformat()
 
     conn = data_service.get_db()
     try:
         if role in ('teacher', 'admin'):
-            # Teachers/admins: only keep the LATEST token (1 device per user per role)
-            conn.execute('DELETE FROM push_tokens WHERE user_id = ? AND role = ?', (user_id, role))
+            # Teachers/admins: keep latest token per channel, without deleting web tokens.
             conn.execute('''
-                INSERT INTO push_tokens (user_id, push_token, device_name, role, student_ids, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (user_id, push_token, device_name, role, student_ids, now, now))
+                DELETE FROM push_tokens
+                WHERE user_id = ?
+                  AND role = ?
+                  AND COALESCE(provider, '') = COALESCE(?, '')
+                  AND COALESCE(platform, '') = COALESCE(?, '')
+                  AND COALESCE(environment, '') = COALESCE(?, '')
+                  AND COALESCE(bundle_id, '') = COALESCE(?, '')
+            ''', (user_id, role, provider, platform, environment, bundle_id))
+            conn.execute('''
+                INSERT INTO push_tokens (
+                    user_id, push_token, device_name, role, provider, platform,
+                    environment, bundle_id, student_ids, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                user_id, push_token, device_name, role, provider, platform,
+                environment, bundle_id, student_ids, now, now
+            ))
         else:
             # Parents: allow multiple devices (UPSERT by user_id + push_token)
             conn.execute('''
-                INSERT INTO push_tokens (user_id, push_token, device_name, role, student_ids, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO push_tokens (
+                    user_id, push_token, device_name, role, provider, platform,
+                    environment, bundle_id, student_ids, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id, push_token) DO UPDATE SET
                     device_name = excluded.device_name,
                     role = excluded.role,
+                    provider = excluded.provider,
+                    platform = excluded.platform,
+                    environment = excluded.environment,
+                    bundle_id = excluded.bundle_id,
                     student_ids = excluded.student_ids,
                     updated_at = excluded.updated_at
-            ''', (user_id, push_token, device_name, role, student_ids, now, now))
+            ''', (
+                user_id, push_token, device_name, role, provider, platform,
+                environment, bundle_id, student_ids, now, now
+            ))
         conn.commit()
         return jsonify({'status': 'ok', 'message': 'Push token registered'}), 200
     except Exception as e:

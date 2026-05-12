@@ -28,6 +28,65 @@ def _cache_student_names(students):
     except Exception as e:
         print(f'[StudentNames] Cache error: {e}')
 
+
+def _cache_teacher_scope(user_id, semester, teacher, teaching_classes, students):
+    """Cache teacher → class and student → class mapping for targeted notifications."""
+    try:
+        conn = sqlite3.connect(_DB_PATH)
+        now = datetime.now().isoformat()
+        conn.execute('''CREATE TABLE IF NOT EXISTS teacher_class_memberships (
+            user_id VARCHAR(100) NOT NULL,
+            semester VARCHAR(50) NOT NULL,
+            class_name VARCHAR(100) NOT NULL,
+            is_admin BOOLEAN DEFAULT 0,
+            updated_at VARCHAR(50),
+            PRIMARY KEY (user_id, semester, class_name)
+        )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS student_class_cache (
+            student_id VARCHAR(50) NOT NULL,
+            semester VARCHAR(50) NOT NULL,
+            class_name VARCHAR(100) NOT NULL,
+            chinese_name VARCHAR(100),
+            english_name VARCHAR(100),
+            updated_at VARCHAR(50),
+            PRIMARY KEY (student_id, semester)
+        )''')
+        conn.execute(
+            'DELETE FROM teacher_class_memberships WHERE user_id = ? AND semester = ?',
+            (user_id, semester)
+        )
+        normalized_classes = []
+        seen = set()
+        for class_name in teaching_classes:
+            class_name = (class_name or '').strip()
+            if class_name and class_name not in seen:
+                seen.add(class_name)
+                normalized_classes.append(class_name)
+        for class_name in normalized_classes:
+            conn.execute('''
+                INSERT OR REPLACE INTO teacher_class_memberships
+                    (user_id, semester, class_name, is_admin, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (user_id, semester, class_name, 1 if teacher.get('isAdmin', False) else 0, now))
+
+        for student in students:
+            conn.execute('''
+                INSERT OR REPLACE INTO student_class_cache
+                    (student_id, semester, class_name, chinese_name, english_name, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (
+                student.get('studentId', ''),
+                semester,
+                student.get('className', ''),
+                student.get('chineseName', ''),
+                student.get('englishName', ''),
+                now,
+            ))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f'[TeacherScope] Cache error: {e}')
+
 def get_current_semester():
     now = datetime.now()
     if now.month >= 8:
@@ -76,7 +135,11 @@ def get_classes():
     include_all_classes = is_admin and (
         show_all_data if has_explicit_data_scope else True
     )
-    teaching_classes = [c.get('className') for c in teacher.get('teachingClasses', {}).get(semester, [])]
+    teaching_classes = [
+        c.get('className')
+        for c in teacher.get('teachingClasses', {}).get(semester, [])
+        if c.get('className')
+    ]
     
     url = "https://web.wentzao.com/api/get_class_student_info"
     headers = {"Content-Type": "application/json"}
@@ -138,6 +201,13 @@ def get_classes():
         # Cache student names for notification lookups
         if filtered_students:
             _cache_student_names(filtered_students)
+        _cache_teacher_scope(
+            user_id,
+            semester,
+            teacher,
+            teaching_classes if teaching_classes else filtered_classes,
+            filtered_students
+        )
 
         return jsonify({
             'semester': semester,
