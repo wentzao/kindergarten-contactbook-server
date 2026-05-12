@@ -1,6 +1,11 @@
 # Firebase service account key (DO NOT commit)
 firebase-service-account.json
 
+# Apple APNs auth keys and macOS SMB metadata (DO NOT commit)
+*.p8
+._*
+.DS_Store
+
 # Python
 __pycache__/
 *.pyc
