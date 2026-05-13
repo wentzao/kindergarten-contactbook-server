@@ -3,6 +3,7 @@ flask-cors
 flask-sock
 simple-websocket
 werkzeug
+gunicorn>=22,<24
 requests
 google-auth>=2.23,<3
 httpx[http2]>=0.27,<1

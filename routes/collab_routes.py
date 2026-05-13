@@ -5,8 +5,8 @@ Phase 1 intentionally reuses the existing tables:
   - journal:{className}:{date} is persisted to class_journals.content_blocks
   - note:{studentId}:{date} is persisted to contact_books teacher note columns
 
-Presence and connected sessions are in memory. With the current deployment
-(`gunicorn -k eventlet -w 1`) this gives a practical live editing layer without
+Presence and connected sessions are in memory. The current deployment uses
+Gunicorn gthread with a single worker, which keeps live editing practical without
 adding schema. If the deployment later uses multiple workers, this module needs
 a shared pub/sub backend.
 """

@@ -373,9 +373,16 @@ Swift WebSocket：
 
 ## 11. 後端部署規則
 
-目前 backend 是 Flask + WSGI 風格。長連線協作不應硬塞進一般同步 request handler。
+目前 backend 是 Flask + WSGI 風格。長連線協作可以先由 Flask-Sock 承接，但部署方式要避免會 monkey patch 標準 socket/select 的 worker，以免影響 APNs HTTP/2、一般 requests 與未來 Python/Ubuntu 相容性。
 
-第一版採用現有 Flask + eventlet + single worker，presence 放記憶體，並直接寫回現有資料表。若未來流量變大，再評估以下路線：
+第一版改採 Flask + Gunicorn `gthread` + single worker，presence 放記憶體，並直接寫回現有資料表。若未來流量變大，再評估以下路線：
+
+### 目前部署
+
+1. 使用 `gunicorn --worker-class gthread --workers 1 --threads 12 --bind 0.0.0.0:5200 app:app`。
+2. 不再使用 `eventlet`，避免 green select/socket 影響 APNs HTTP/2 client。
+3. `WEB_WORKERS` 預設維持 `1`，因為 presence 與 connected sessions 仍在單一 process 記憶體中。
+4. 若要增加 worker，必須先導入 Redis/pub-sub 或獨立 collaboration service，否則不同 worker 間看不到彼此 presence。
 
 ### A. Node collaboration sidecar（優先）
 

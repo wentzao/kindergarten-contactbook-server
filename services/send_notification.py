@@ -10,6 +10,7 @@ import sys
 import warnings
 import base64
 import time
+import subprocess
 import requests
 
 # Keep Python 3.8 runtime quiet before migration; this warning is informational.
@@ -239,9 +240,101 @@ def _apns_jwt():
     return _APNS_JWT
 
 
+def _build_apns_request(row, title, body, data, jwt_token):
+    alert_payload = {'data': data or {}}
+    if title:
+        alert_payload['aps'] = {
+            'alert': {'title': title, 'body': body or ''},
+            'sound': 'default',
+        }
+    else:
+        alert_payload['aps'] = {'content-available': 1}
+
+    headers = {
+        'authorization': f'bearer {jwt_token}',
+        'apns-topic': _apns_bundle_for_row(row),
+        'apns-push-type': 'alert' if title else 'background',
+        'apns-priority': '10' if title else '5',
+    }
+    return alert_payload, headers
+
+
+def _should_use_curl_for_apns():
+    """eventlet's green select module can break HTTP/2 clients on Linux."""
+    transport = os.environ.get('APNS_TRANSPORT', 'auto').strip().lower()
+    if transport == 'curl':
+        return True
+    if transport == 'httpx':
+        return False
+    if not sys.platform.startswith('linux'):
+        return False
+
+    try:
+        import select
+        return not hasattr(select, 'epoll')
+    except Exception:
+        return True
+
+
+def _send_single_apns_with_curl(host, device_token, payload, headers):
+    curl_headers = []
+    for key, value in headers.items():
+        curl_headers.extend(['-H', f'{key}: {value}'])
+    curl_headers.extend(['-H', 'content-type: application/json'])
+
+    cmd = [
+        'curl',
+        '--silent',
+        '--show-error',
+        '--http2',
+        '--request',
+        'POST',
+        f'{host}/3/device/{device_token}',
+        '--data-binary',
+        '@-',
+        '--write-out',
+        '\n%{http_code}',
+        *curl_headers,
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            input=json.dumps(payload, separators=(',', ':')),
+            text=True,
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+    except FileNotFoundError:
+        print('[APNs] curl command not found; install curl with HTTP/2 support or set APNS_TRANSPORT=httpx')
+        return False
+    except subprocess.TimeoutExpired:
+        print('[APNs] curl request timed out')
+        return False
+
+    output = result.stdout or ''
+    status_line = output.rsplit('\n', 1)[-1].strip()
+    try:
+        status_code = int(status_line)
+    except ValueError:
+        status_code = 0
+
+    response_body = output[:-(len(status_line) + 1)] if status_line else output
+    if result.returncode != 0:
+        print(f'[APNs] curl failed ({result.returncode}): {(result.stderr or response_body)[:200]}')
+        return False
+    if 200 <= status_code < 300:
+        return True
+
+    detail = response_body.strip() or result.stderr.strip() or 'empty response'
+    print(f'[APNs] Send failed ({status_code}): {detail[:200]}')
+    return False
+
+
 def _send_apns(rows, title, body, data=None):
     """Send notifications via Apple's APNs HTTP/2 API."""
-    if httpx is None:
+    if httpx is None and not _should_use_curl_for_apns():
         print('[APNs] httpx dependency is not installed')
         return 0
 
@@ -257,27 +350,23 @@ def _send_apns(rows, title, body, data=None):
 
     for env, env_rows in by_environment.items():
         host = 'https://api.push.apple.com' if env == 'production' else 'https://api.sandbox.push.apple.com'
+        if _should_use_curl_for_apns():
+            for row in env_rows:
+                device_token = str(_row_value(row, 'push_token', '') or '').strip()
+                if not device_token:
+                    continue
+                payload, headers = _build_apns_request(row, title, body, data, token)
+                if _send_single_apns_with_curl(host, device_token, payload, headers):
+                    success_count += 1
+            continue
+
         try:
             with httpx.Client(http2=True, timeout=10) as client:
                 for row in env_rows:
                     device_token = str(_row_value(row, 'push_token', '') or '').strip()
                     if not device_token:
                         continue
-                    alert_payload = {'data': data or {}}
-                    if title:
-                        alert_payload['aps'] = {
-                            'alert': {'title': title, 'body': body or ''},
-                            'sound': 'default',
-                        }
-                    else:
-                        alert_payload['aps'] = {'content-available': 1}
-
-                    headers = {
-                        'authorization': f'bearer {token}',
-                        'apns-topic': _apns_bundle_for_row(row),
-                        'apns-push-type': 'alert' if title else 'background',
-                        'apns-priority': '10' if title else '5',
-                    }
+                    alert_payload, headers = _build_apns_request(row, title, body, data, token)
                     resp = client.post(
                         f'{host}/3/device/{device_token}',
                         headers=headers,
@@ -288,7 +377,14 @@ def _send_apns(rows, title, body, data=None):
                     else:
                         print(f'[APNs] Send failed ({resp.status_code}): {resp.text[:200]}')
         except Exception as e:
-            print(f'[APNs] Request error: {e}')
+            print(f'[APNs] httpx request error, retrying with curl: {e}')
+            for row in env_rows:
+                device_token = str(_row_value(row, 'push_token', '') or '').strip()
+                if not device_token:
+                    continue
+                alert_payload, headers = _build_apns_request(row, title, body, data, token)
+                if _send_single_apns_with_curl(host, device_token, alert_payload, headers):
+                    success_count += 1
 
     return success_count
 
@@ -686,13 +782,12 @@ def notify_parents_announcement_update(data_service, news_id):
 
 
 def notify_teachers_status_update(data_service, student_id, student_name, date, new_status):
-    """Silent data-only push so teacher web can instantly update contact book status.
+    """Notify teacher clients when parent read/signature status changes.
     
-    No notification popup is shown — this is a background data channel only.
+    Read remains data-only, while signed is visible because teachers usually need
+    to know immediately when the contact book has been completed.
     new_status: 'read' | 'signed'
     """
-    # FCM data-only messages must NOT have a notification block in send_to_tokens
-    # We pass empty title/body and rely on data payload exclusively
     data = {
         'type': 'contact_book_status',
         'studentId': str(student_id),
@@ -700,8 +795,15 @@ def notify_teachers_status_update(data_service, student_id, student_name, date, 
         'date': str(date),
         'status': str(new_status),
     }
+    if str(new_status) == 'signed':
+        title = f'✍️ {student_name} 的聯絡簿已簽名'
+        body = f'{date} 家長已完成簽名'
+    else:
+        # FCM data-only messages must NOT have a notification block.
+        title = ''
+        body = ''
 
-    count = _send_to_responsible_teachers(data_service, student_id, '', '', data)
+    count = _send_to_responsible_teachers(data_service, student_id, title, body, data)
 
     if count > 0:
         print(f'[Push] Sent status update ({new_status}) for {student_name} to {count} responsible teacher devices')
