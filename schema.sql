@@ -215,3 +215,23 @@ CREATE TABLE class_journals (
     UNIQUE(class_name, date)
 );
 CREATE INDEX idx_cj_class_date ON class_journals(class_name, date);
+
+DROP TABLE IF EXISTS scheduled_contact_book_notifications;
+CREATE TABLE scheduled_contact_book_notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id VARCHAR(50) NOT NULL,
+    date VARCHAR(20) NOT NULL,
+    class_name VARCHAR(100),
+    student_name VARCHAR(100),
+    send_at VARCHAR(50) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    sent_by VARCHAR(100),
+    sent_at VARCHAR(50),
+    created_at VARCHAR(50) NOT NULL,
+    updated_at VARCHAR(50),
+    error TEXT
+);
+CREATE INDEX idx_scbn_pending_send_at
+    ON scheduled_contact_book_notifications(status, send_at);
+CREATE INDEX idx_scbn_student_date
+    ON scheduled_contact_book_notifications(student_id, date, status);

@@ -5,6 +5,16 @@ import json
 import threading
 import requests as http_requests
 from services.data_service import DataService
+from services.contact_book_publish_service import (
+    cancel_scheduled_contact_book_publish,
+    ensure_scheduled_contact_book_notifications_table,
+    get_pending_schedule_map,
+    get_pending_schedule_map_for_date,
+    publish_contact_book_now,
+    schedule_contact_book_dismissal_publish,
+    serialize_scheduled_notification,
+    start_scheduled_contact_book_notification_worker,
+)
 import os
 
 
@@ -106,6 +116,7 @@ def _auto_migrate():
     conn = None
     try:
         conn = data_service.get_db()
+        ensure_scheduled_contact_book_notifications_table(conn)
         cols = [row[1] for row in conn.execute('PRAGMA table_info(contact_books)').fetchall()]
         if 'edited_by' not in cols:
             conn.execute('ALTER TABLE contact_books ADD COLUMN edited_by TEXT')
@@ -139,6 +150,7 @@ def _auto_migrate():
             conn.close()
 
 _auto_migrate()
+start_scheduled_contact_book_notification_worker(data_service)
 
 # Lazy import to avoid circular imports or missing dependencies
 def _get_notifier():
@@ -230,7 +242,7 @@ def _load_teacher_profiles(conn):
         return {}
 
 
-def format_record(r, version='original', teacher_profiles=None):
+def format_record(r, version='original', teacher_profiles=None, scheduled_notification=None):
     # Compute dayOfWeek from date if not stored
     date_str = r['date']
     stored_dow = r['day_of_week']
@@ -296,6 +308,7 @@ def format_record(r, version='original', teacher_profiles=None):
         'comments': comments,
         'surveyId': r['survey_id'],
         'editedBy': edited_by_raw,
+        'scheduledNotification': serialize_scheduled_notification(scheduled_notification),
     }
 
     # Apply versioning overlay (original or redacted)
@@ -377,7 +390,11 @@ def get_contact_book(student_id, year, month):
         if not rows:
             return jsonify({'studentId': student_id, 'year': year, 'month': month, 'records': []}), 200
 
-        records = [format_record(r, version, profiles) for r in rows]
+        schedule_map = get_pending_schedule_map(conn, student_id, [r['date'] for r in rows])
+        records = [
+            format_record(r, version, profiles, schedule_map.get(r['date']))
+            for r in rows
+        ]
 
         # Embed class journal blocks if className is provided
         # Only show journal for dates where THIS STUDENT has been notified (per-student check)
@@ -522,6 +539,53 @@ def update_teacher_entry(student_id, date):
     finally:
         conn.close()
 
+
+@contact_book_bp.route('/<student_id>/<date>/publish', methods=['POST'])
+def publish_student_contact_book(student_id, date):
+    """Publish one student's contact book immediately or schedule it for dismissal time."""
+    data = request.json or {}
+    mode = (data.get('mode') or 'immediate').strip().lower()
+    class_name = data.get('className') or ''
+    student_name = data.get('studentName') or ''
+    sent_by = data.get('sentBy') or ''
+
+    try:
+        if mode == 'dismissal':
+            result = schedule_contact_book_dismissal_publish(
+                data_service,
+                student_id,
+                date,
+                class_name=class_name,
+                student_name=student_name,
+                sent_by=sent_by,
+            )
+        elif mode == 'immediate':
+            result = publish_contact_book_now(
+                data_service,
+                student_id,
+                date,
+                class_name=class_name,
+                student_name=student_name,
+                sent_by=sent_by,
+            )
+        else:
+            return jsonify({'error': 'mode must be immediate or dismissal'}), 400
+        return jsonify(result), 200
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@contact_book_bp.route('/<student_id>/<date>/publish-schedule', methods=['DELETE'])
+def cancel_student_contact_book_publish_schedule(student_id, date):
+    """Cancel a pending dismissal publish for one student's contact book."""
+    try:
+        return jsonify(cancel_scheduled_contact_book_publish(data_service, student_id, date)), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @contact_book_bp.route('/<student_id>/latest', methods=['GET'])
 def get_latest_records(student_id):
     limit = request.args.get('limit', 10, type=int)
@@ -551,7 +615,11 @@ def get_latest_records(student_id):
                 ''',
                 (student_id, limit)
             ).fetchall()
-        records = [format_record(r, 'original', profiles) for r in rows]
+        schedule_map = get_pending_schedule_map(conn, student_id, [r['date'] for r in rows])
+        records = [
+            format_record(r, 'original', profiles, schedule_map.get(r['date']))
+            for r in rows
+        ]
         return jsonify(records), 200
     finally:
         conn.close()
@@ -1059,6 +1127,7 @@ def get_class_date_teacher(class_name, date):
         ).fetchall()
 
         result = {}
+        schedule_map = get_pending_schedule_map_for_date(conn, date)
         for r in rows:
             teacher_data = load_json(r['original_teacher']) or {}
             teacher_data['status'] = _canonical_contact_book_status(
@@ -1078,6 +1147,9 @@ def get_class_date_teacher(class_name, date):
                 teacher_data['returnedItems'] = returned
             if r['survey_id']:
                 teacher_data['surveyId'] = r['survey_id']
+            teacher_data['scheduledNotification'] = serialize_scheduled_notification(
+                schedule_map.get(r['student_id'])
+            )
             result[r['student_id']] = teacher_data
 
         return jsonify(result), 200

@@ -114,6 +114,7 @@ python test_api.py
 | `notification_preferences` | 使用者通知偏好 |
 | `teacher_notifications` | 教師端通知 inbox、已讀與 badge 計數 |
 | `teacher_comment_reads` | 教師已讀留言追蹤 |
+| `scheduled_contact_book_notifications` | 單一學生聯絡簿放學發布排程 |
 
 ---
 
