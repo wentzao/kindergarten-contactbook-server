@@ -17,12 +17,24 @@ import sqlite3
 from flask import Blueprint, jsonify, request
 import requests
 from services.admin_auth import require_admin
+from services.data_service import DataService
+from services.push_outbox_service import (
+    cancel_push_outbox_job,
+    get_push_outbox_summary,
+    list_push_outbox_jobs,
+    process_push_outbox,
+    retry_failed_push_outbox_jobs,
+    retry_push_outbox_job,
+)
 
 admin_bp = Blueprint('admin', __name__)
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'kindergarten.db')
+DEFAULT_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'kindergarten.db')
+DB_PATH = os.environ.get('KINDERGARTEN_DB_PATH') or os.environ.get('DB_PATH') or DEFAULT_DB_PATH
 IMAGE_SERVER_URL = os.environ.get('IMAGE_SERVER_URL', 'https://imageserver.wentzao.com').rstrip('/')
 IMAGE_SERVER_ADMIN_TOKEN = os.environ.get('IMAGE_SERVER_ADMIN_TOKEN', '').strip()
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
+data_service = DataService(DATA_DIR)
 
 
 # Tables that store rows keyed by student/child. Order matters only when there
@@ -225,3 +237,106 @@ def delete_student(student_id):
         'db_rows_removed': db_removed,
         'image_folders_removed': image_removed,
     }), 200
+
+
+@admin_bp.route('/outbox/summary', methods=['GET'])
+@require_admin
+def outbox_summary():
+    """Return push outbox counts and recent failed jobs."""
+    conn = data_service.get_db()
+    try:
+        summary = get_push_outbox_summary(conn)
+        summary['dbPath'] = data_service.db_path
+        return jsonify(summary), 200
+    finally:
+        conn.close()
+
+
+@admin_bp.route('/outbox', methods=['GET'])
+@require_admin
+def outbox_list():
+    """List push outbox jobs for diagnostics."""
+    raw_status = request.args.get('status', '').strip()
+    statuses = [part.strip() for part in raw_status.split(',') if part.strip()] if raw_status else None
+    event_type = request.args.get('eventType', '').strip() or None
+    limit = request.args.get('limit', 100, type=int)
+
+    conn = data_service.get_db()
+    try:
+        return jsonify({
+            'jobs': list_push_outbox_jobs(
+                conn,
+                statuses=statuses,
+                event_type=event_type,
+                limit=limit,
+            )
+        }), 200
+    finally:
+        conn.close()
+
+
+@admin_bp.route('/outbox/<int:job_id>/retry', methods=['POST'])
+@require_admin
+def outbox_retry(job_id):
+    """Reset one failed/sending/cancelled outbox job to pending."""
+    conn = data_service.get_db()
+    try:
+        changed, job = retry_push_outbox_job(conn, job_id)
+        conn.commit()
+        if not job:
+            return jsonify({'error': 'Outbox job not found'}), 404
+        return jsonify({'retried': changed, 'job': job}), 200
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@admin_bp.route('/outbox/retry-failed', methods=['POST'])
+@require_admin
+def outbox_retry_failed():
+    """Reset recent failed outbox jobs to pending."""
+    data = request.json or {}
+    limit = min(max(int(data.get('limit', 100)), 1), 500)
+    conn = data_service.get_db()
+    try:
+        count, ids = retry_failed_push_outbox_jobs(conn, limit=limit)
+        conn.commit()
+        return jsonify({'retried': count, 'ids': ids}), 200
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@admin_bp.route('/outbox/<int:job_id>', methods=['DELETE'])
+@require_admin
+def outbox_cancel(job_id):
+    """Cancel one pending/sending/failed outbox job."""
+    conn = data_service.get_db()
+    try:
+        changed, job = cancel_push_outbox_job(conn, job_id)
+        conn.commit()
+        if not job:
+            return jsonify({'error': 'Outbox job not found'}), 404
+        return jsonify({'cancelled': changed, 'job': job}), 200
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@admin_bp.route('/outbox/process', methods=['POST'])
+@require_admin
+def outbox_process():
+    """Run the push outbox worker once in-process for manual recovery."""
+    data = request.json or {}
+    limit = min(max(int(data.get('limit', 50)), 1), 100)
+    try:
+        processed = process_push_outbox(data_service, limit=limit)
+        return jsonify({'processed': processed}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500

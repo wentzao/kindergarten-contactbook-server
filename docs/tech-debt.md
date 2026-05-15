@@ -1,6 +1,6 @@
 # 技術債務清單（Tech Debt）— 後端 API
 
-> 最後更新：2026-03-17
+> 最後更新：2026-05-15
 > 本文件記錄後端 codebase review 中發現的設計問題、重複程式碼、潛在風險等，供後續重構參考。
 
 ---
@@ -141,7 +141,19 @@
 
 ---
 
-### 2-E. 部分 route 重複登記兩個路徑解決尾斜線問題
+### 2-E. 推播通知仍未全面收斂到 durable outbox
+
+- **位置**：`routes/*_routes.py`、`services/send_notification.py`
+- **問題**：主要使用者通知路徑已改用 `push_outbox`，包含聯絡簿發布、公告、留言、家長讀取/簽名狀態、教師端 data_updated、lock/collab silent push。剩餘 `threading.Thread` 主要是 worker 本身、Expo receipt 延遲檢查，以及家長頭像快取抓取。
+- **建議修法**：
+  1. 替管理端 outbox API 補教師前端 UI，方便追蹤通知是否已送出
+  2. 補 outbox 事件保留期限與清理策略
+  3. 將 Expo receipt 結果與失效 token pruning 寫回資料庫
+- **優先級**：🟡 中（主要通知路徑已先行修復）
+
+---
+
+### 2-F. 部分 route 重複登記兩個路徑解決尾斜線問題
 
 - **位置**：`routes/leave_routes.py:69-70`
 - **問題**：

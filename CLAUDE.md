@@ -115,6 +115,8 @@ python test_api.py
 | `teacher_notifications` | 教師端通知 inbox、已讀與 badge 計數 |
 | `teacher_comment_reads` | 教師已讀留言追蹤 |
 | `scheduled_contact_book_notifications` | 單一學生聯絡簿放學發布排程 |
+| `contact_book_publish_events` | 單一學生聯絡簿發布狀態轉移與推播 delivery log |
+| `push_outbox` | Durable push 任務佇列；聯絡簿發布會先寫入 outbox，再由 worker 發送與重試 |
 
 ---
 
@@ -169,7 +171,10 @@ pending_teacher  →  pending_parent  →  read  →  signed
 ### 環境設定
 - LINE OAuth 相關 credential 應從環境變數讀取
 - Firebase 服務帳號從 `firebase-service-account.json` 讀取（⚠️ 見 tech-debt）
+- SQLite DB 路徑可用 `KINDERGARTEN_DB_PATH`（或相容舊名 `DB_PATH`）覆寫；若部署目錄在 SMB/NAS volume，建議把 DB 放在本機磁碟再備份，避免 SQLite 無法開檔或鎖定異常。
 
 ### 通知觸發
-- 在 route handler 完成資料儲存後，用 `threading.Thread` 非同步發送通知
-- 避免推播延遲影響 API 回應時間
+- 聯絡簿發布使用 `push_outbox` durable outbox：單一學生發布、批次通知、班級日誌發布都會把聯絡簿狀態、發布事件、推播任務在同一個 transaction 內提交，再由 background worker claim / retry。
+- 公告、聯絡簿留言/刪除、家長讀取/簽名狀態、教師端 data_updated、lock/collab silent push 也已收斂到 `push_outbox`。
+- 仍保留的 `threading.Thread` 主要是 outbox/scheduler worker、Expo receipt 延遲檢查，以及家長頭像快取抓取；它們不再承擔主要資料狀態變更後的通知投遞責任。
+- 管理端 outbox API 位於 `/api/admin/outbox*`，需 `X-Admin-Token`：可查 summary/list、重送單筆、批次重送 failed、取消 job、手動 process 一次。

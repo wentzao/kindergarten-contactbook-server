@@ -8,12 +8,23 @@ from services.data_service import DataService
 from services.contact_book_publish_service import (
     cancel_scheduled_contact_book_publish,
     ensure_scheduled_contact_book_notifications_table,
+    get_publish_events,
     get_pending_schedule_map,
     get_pending_schedule_map_for_date,
     publish_contact_book_now,
     schedule_contact_book_dismissal_publish,
     serialize_scheduled_notification,
     start_scheduled_contact_book_notification_worker,
+)
+from services.push_outbox_service import (
+    EVENT_CONTACT_BOOK_PARENT_COMMENT,
+    EVENT_CONTACT_BOOK_PARENT_COMMENT_DELETED,
+    EVENT_CONTACT_BOOK_TEACHER_COMMENT,
+    EVENT_CONTACT_BOOK_TEACHER_COMMENT_DELETED,
+    EVENT_CONTACT_BOOK_TEACHER_STATUS,
+    EVENT_TEACHER_USER_IDS_PUSH,
+    enqueue_push_job,
+    start_push_outbox_worker,
 )
 import os
 
@@ -151,6 +162,7 @@ def _auto_migrate():
 
 _auto_migrate()
 start_scheduled_contact_book_notification_worker(data_service)
+start_push_outbox_worker(data_service)
 
 # Lazy import to avoid circular imports or missing dependencies
 def _get_notifier():
@@ -586,6 +598,23 @@ def cancel_student_contact_book_publish_schedule(student_id, date):
         return jsonify({'error': str(e)}), 500
 
 
+@contact_book_bp.route('/<student_id>/<date>/publish-events', methods=['GET'])
+def get_student_contact_book_publish_events(student_id, date):
+    """Return recent publish transition/delivery events for diagnostics."""
+    limit = min(max(request.args.get('limit', 20, type=int), 1), 100)
+    conn = data_service.get_db()
+    try:
+        return jsonify({
+            'studentId': student_id,
+            'date': date,
+            'events': get_publish_events(conn, student_id, date, limit=limit),
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
 @contact_book_bp.route('/<student_id>/latest', methods=['GET'])
 def get_latest_records(student_id):
     limit = request.args.get('limit', 10, type=int)
@@ -647,17 +676,22 @@ def mark_as_read(student_id, date):
             read_at = data.get('readAt') or datetime.now().isoformat()
             conn.execute('UPDATE contact_books SET status = ?, read_at = ?, last_modified = ? WHERE student_id = ? AND date = ?',
                          (STATUS_READ, read_at, datetime.now().isoformat(), student_id, date))
+            student_name = data.get('studentName') or student_id
+            enqueue_push_job(
+                conn,
+                EVENT_CONTACT_BOOK_TEACHER_STATUS,
+                'student_teachers',
+                recipient_id=student_id,
+                payload={
+                    'studentId': student_id,
+                    'studentName': student_name,
+                    'date': date,
+                    'status': 'read',
+                },
+                idempotency_key=f'contact_book_status:{student_id}:{date}:read:{read_at}',
+            )
             conn.commit()
             status_changed = True
-        
-        # Notify teachers via silent FCM push (no toast shown)
-        if status_changed:
-            student_name = data.get('studentName') or student_id
-            def _notify_bg():
-                notify = _get_status_notifier()
-                if notify:
-                    notify(data_service, student_id, student_name, date, 'read')
-            threading.Thread(target=_notify_bg, daemon=True).start()
         
         return jsonify({'status': 'updated'}), 200
     except Exception as e:
@@ -695,15 +729,21 @@ def mark_as_signed(student_id, date):
                 'WHERE student_id = ? AND date = ?',
                 ('signed', signed_at, signature_url, datetime.now().isoformat(), student_id, date),
             )
-        conn.commit()
-        
-        # Notify teachers via silent FCM push (no toast shown)
         student_name = data.get('studentName', student_id)
-        def _notify_bg():
-            notify = _get_status_notifier()
-            if notify:
-                notify(data_service, student_id, student_name, date, 'signed')
-        threading.Thread(target=_notify_bg, daemon=True).start()
+        enqueue_push_job(
+            conn,
+            EVENT_CONTACT_BOOK_TEACHER_STATUS,
+            'student_teachers',
+            recipient_id=student_id,
+            payload={
+                'studentId': student_id,
+                'studentName': student_name,
+                'date': date,
+                'status': 'signed',
+            },
+            idempotency_key=f'contact_book_status:{student_id}:{date}:signed:{signed_at}',
+        )
+        conn.commit()
         
         return jsonify({'status': 'signed'}), 200
     except Exception as e:
@@ -786,7 +826,6 @@ def handle_comments(student_id, date):
 
             conn.execute('UPDATE contact_books SET comments = ?, last_modified = ? WHERE student_id = ? AND date = ?',
                          (json.dumps(comments, ensure_ascii=False), now_iso, student_id, date))
-            conn.commit()
 
             # Resolve teacher name for notification push text
             profiles = _load_teacher_profiles(conn)
@@ -805,17 +844,39 @@ def handle_comments(student_id, date):
             content_preview = comment['content']
             student_name = data.get('studentName') or student_id
 
-            def _send_bg():
-                if sender_role in ('teacher', 'admin'):
-                    notify = _get_parent_comment_notifier()
-                    if notify:
-                        notify(data_service, student_id, student_name, sender_display, content_preview, date)
-                else:
-                    notify = _get_notifier()
-                    if notify:
-                        notify(data_service, student_id, student_name, sender_display, content_preview, date)
+            if sender_role in ('teacher', 'admin'):
+                enqueue_push_job(
+                    conn,
+                    EVENT_CONTACT_BOOK_PARENT_COMMENT,
+                    'student_parents',
+                    recipient_id=student_id,
+                    payload={
+                        'studentId': student_id,
+                        'studentName': student_name,
+                        'senderName': sender_display,
+                        'content': content_preview,
+                        'date': date,
+                    },
+                    idempotency_key=f'contact_book_comment_parent:{comment["id"]}',
+                    pref_column='contact_book_notify',
+                )
+            else:
+                enqueue_push_job(
+                    conn,
+                    EVENT_CONTACT_BOOK_TEACHER_COMMENT,
+                    'student_teachers',
+                    recipient_id=student_id,
+                    payload={
+                        'studentId': student_id,
+                        'studentName': student_name,
+                        'senderName': sender_display,
+                        'content': content_preview,
+                        'date': date,
+                    },
+                    idempotency_key=f'contact_book_comment_teacher:{comment["id"]}',
+                )
 
-            threading.Thread(target=_send_bg, daemon=True).start()
+            conn.commit()
 
             return jsonify(comment), 201
             
@@ -940,20 +1001,35 @@ def delete_comment(student_id, date, comment_id):
             'UPDATE contact_books SET comments = ?, last_modified = ? WHERE student_id = ? AND date = ?',
             (json.dumps(filtered, ensure_ascii=False), datetime.now().isoformat(), student_id, date)
         )
+        if deleted_sender_role == 'teacher':
+            enqueue_push_job(
+                conn,
+                EVENT_CONTACT_BOOK_PARENT_COMMENT_DELETED,
+                'student_parents',
+                recipient_id=student_id,
+                payload={
+                    'studentId': student_id,
+                    'date': date,
+                    'imageUrl': deleted_image_url,
+                },
+                idempotency_key=f'contact_book_comment_deleted_parent:{student_id}:{date}:{comment_id}',
+                pref_column='contact_book_notify',
+            )
+        else:
+            enqueue_push_job(
+                conn,
+                EVENT_CONTACT_BOOK_TEACHER_COMMENT_DELETED,
+                'student_teachers',
+                recipient_id=student_id,
+                payload={
+                    'studentId': student_id,
+                    'date': date,
+                    'content': deleted_content,
+                    'senderName': deleted_sender_name,
+                },
+                idempotency_key=f'contact_book_comment_deleted_teacher:{student_id}:{date}:{comment_id}',
+            )
         conn.commit()
-
-        # Notify the other party so their chat view refreshes and evicts the cached image.
-        # Teacher deleted → notify parents (silent). Parent deleted → notify teachers (visible).
-        def _send_bg():
-            if deleted_sender_role == 'teacher':
-                notify = _get_parent_comment_deleted_notifier()
-                if notify:
-                    notify(data_service, student_id, date, deleted_image_url)
-            else:
-                notify = _get_comment_deleted_notifier()
-                if notify:
-                    notify(data_service, student_id, date, deleted_content, deleted_sender_name)
-        threading.Thread(target=_send_bg, daemon=True).start()
 
         return jsonify({'status': 'deleted', 'remaining': len(filtered)}), 200
 
@@ -1050,39 +1126,34 @@ def batch_save_teacher(class_name, date):
                       edited_by, new_status, datetime.now().isoformat(), student_id, date))
             saved_count += 1
 
-        conn.commit()
-
         # Send silent "data_updated" notification for student notes
         if saved_count > 0:
             saved_ids = [sid for sid in students_data.keys() if sid not in conflicts]
-            def _notify():
-                try:
-                    from services.send_notification import send_to_teacher_user_ids
-                    notify_data = {
+            rows = conn.execute(
+                'SELECT DISTINCT user_id FROM teacher_class_memberships WHERE class_name = ?',
+                (class_name,)
+            ).fetchall()
+            enqueue_push_job(
+                conn,
+                EVENT_TEACHER_USER_IDS_PUSH,
+                'teacher_user_ids',
+                recipient_id=class_name,
+                payload={
+                    'userIds': [r['user_id'] for r in rows],
+                    'title': '',
+                    'body': '',
+                    'data': {
                         'type': 'data_updated',
                         'dataType': 'student_notes',
                         'className': class_name,
                         'date': date,
                         'studentIds': json.dumps(saved_ids),
-                    }
-                    notify_conn = data_service.get_db()
-                    try:
-                        rows = notify_conn.execute(
-                            'SELECT DISTINCT user_id FROM teacher_class_memberships WHERE class_name = ?',
-                            (class_name,)
-                        ).fetchall()
-                    finally:
-                        notify_conn.close()
-                    send_to_teacher_user_ids(
-                        data_service,
-                        [r['user_id'] for r in rows],
-                        '',
-                        '',
-                        notify_data
-                    )
-                except Exception as e:
-                    print(f'[ContactBook] data_updated notification error: {e}')
-            threading.Thread(target=_notify, daemon=True).start()
+                    },
+                },
+                idempotency_key=f'contact_book_batch_data_updated:{class_name}:{date}:{datetime.now().isoformat()}',
+            )
+
+        conn.commit()
 
         result = {'status': 'saved', 'count': saved_count}
         if conflicts:

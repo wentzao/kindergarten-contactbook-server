@@ -235,3 +235,56 @@ CREATE INDEX idx_scbn_pending_send_at
     ON scheduled_contact_book_notifications(status, send_at);
 CREATE INDEX idx_scbn_student_date
     ON scheduled_contact_book_notifications(student_id, date, status);
+
+DROP TABLE IF EXISTS contact_book_publish_events;
+CREATE TABLE contact_book_publish_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id VARCHAR(50) NOT NULL,
+    date VARCHAR(20) NOT NULL,
+    class_name VARCHAR(100),
+    student_name VARCHAR(100),
+    mode VARCHAR(30) NOT NULL,
+    source_schedule_id INTEGER,
+    transition VARCHAR(60) NOT NULL,
+    from_status VARCHAR(20),
+    to_status VARCHAR(20),
+    sent_by VARCHAR(100),
+    status VARCHAR(30) NOT NULL,
+    delivery_attempted BOOLEAN DEFAULT 0,
+    sent_count INTEGER DEFAULT 0,
+    error TEXT,
+    created_at VARCHAR(50) NOT NULL,
+    updated_at VARCHAR(50)
+);
+CREATE INDEX idx_cbpe_student_date
+    ON contact_book_publish_events(student_id, date, created_at);
+CREATE INDEX idx_cbpe_status_created
+    ON contact_book_publish_events(status, created_at);
+
+DROP TABLE IF EXISTS push_outbox;
+CREATE TABLE push_outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type VARCHAR(80) NOT NULL,
+    recipient_scope VARCHAR(80) NOT NULL,
+    recipient_id VARCHAR(100),
+    title TEXT,
+    body TEXT,
+    payload TEXT NOT NULL,
+    pref_column VARCHAR(80),
+    idempotency_key VARCHAR(200) NOT NULL UNIQUE,
+    source_table VARCHAR(80),
+    source_id INTEGER,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 5,
+    next_attempt_at VARCHAR(50) NOT NULL,
+    sent_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at VARCHAR(50) NOT NULL,
+    updated_at VARCHAR(50),
+    sent_at VARCHAR(50)
+);
+CREATE INDEX idx_push_outbox_due
+    ON push_outbox(status, next_attempt_at);
+CREATE INDEX idx_push_outbox_source
+    ON push_outbox(source_table, source_id);

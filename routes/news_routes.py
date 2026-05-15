@@ -1,9 +1,14 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 from services.data_service import DataService
+from services.push_outbox_service import (
+    EVENT_ANNOUNCEMENT,
+    EVENT_ANNOUNCEMENT_UPDATE,
+    enqueue_push_job,
+    ensure_push_outbox_table,
+)
 import os
 import json
-import threading
 import random
 
 news_bp = Blueprint('news', __name__)
@@ -357,8 +362,20 @@ def notify_news(news_id):
         body_text = ''
         if request.is_json and request.json:
             body_text = request.json.get('body', '')
-        _notify_announcement_bg(news_id, r['title'], body_text)
-        return jsonify({'status': 'queued'})
+        ensure_push_outbox_table(conn)
+        enqueue_push_job(
+            conn,
+            EVENT_ANNOUNCEMENT,
+            'all_parents',
+            recipient_id=news_id,
+            payload={'newsId': news_id, 'title': r['title'], 'body': body_text},
+            idempotency_key=f'announcement:{news_id}:{datetime.now().isoformat()}',
+        )
+        conn.commit()
+        return jsonify({'status': 'queued', 'deliveryQueued': 1})
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -371,29 +388,19 @@ def notify_news_silent(news_id):
         r = conn.execute('SELECT id FROM news WHERE id = ?', (news_id,)).fetchone()
         if not r:
             return jsonify({'error': 'News not found'}), 404
-        _notify_announcement_update_bg(news_id)
-        return jsonify({'status': 'queued'})
+        ensure_push_outbox_table(conn)
+        enqueue_push_job(
+            conn,
+            EVENT_ANNOUNCEMENT_UPDATE,
+            'all_parents',
+            recipient_id=news_id,
+            payload={'newsId': news_id},
+            idempotency_key=f'announcement_update:{news_id}:{datetime.now().isoformat()}',
+        )
+        conn.commit()
+        return jsonify({'status': 'queued', 'deliveryQueued': 1})
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
-
-
-def _notify_announcement_bg(news_id, title_text, body_text=''):
-    """Send announcement notification to all parents in a background thread."""
-    def _send():
-        try:
-            from services.send_notification import notify_parents_announcement
-            notify_parents_announcement(data_service, news_id, title_text, body_text)
-        except Exception as e:
-            print(f'[Notification] Error sending announcement notification: {e}')
-    threading.Thread(target=_send, daemon=True).start()
-
-
-def _notify_announcement_update_bg(news_id):
-    """Send silent announcement-update push to refresh app data without visible notification."""
-    def _send():
-        try:
-            from services.send_notification import notify_parents_announcement_update
-            notify_parents_announcement_update(data_service, news_id)
-        except Exception as e:
-            print(f'[Notification] Error sending silent announcement update: {e}')
-    threading.Thread(target=_send, daemon=True).start()

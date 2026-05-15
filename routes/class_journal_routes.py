@@ -1,11 +1,16 @@
 from flask import Blueprint, request, jsonify
-import os, json, threading
+import os, json
 from datetime import datetime
 
 journal_bp = Blueprint('journal', __name__)
 
 # ── Shared DataService instance ──
 from services.data_service import DataService
+from services.contact_book_publish_service import (
+    ensure_scheduled_contact_book_notifications_table,
+    publish_contact_book_in_transaction,
+)
+from services.push_outbox_service import EVENT_ROLE_PUSH, enqueue_push_job, ensure_push_outbox_table
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 data_service = DataService(DATA_DIR)
 
@@ -79,23 +84,35 @@ def save_journal(class_name, date):
         class_name, date, content_blocks, edited_by
     )
 
-    # Send silent "data_updated" notification to other teachers
-    def _notify_update():
-        try:
-            from services.send_notification import send_to_role
-            notify_data = {
-                'type': 'data_updated',
-                'dataType': 'class_journal',
-                'className': class_name,
-                'date': date,
-                'updatedAt': result.get('updatedAt', ''),
-            }
-            send_to_role(data_service, 'teacher', '', '', notify_data)
-            send_to_role(data_service, 'admin', '', '', notify_data)
-        except Exception as e:
-            print(f'[Journal] data_updated notification error: {e}')
-
-    threading.Thread(target=_notify_update, daemon=True).start()
+    # Send silent "data_updated" notification to other teachers via durable outbox.
+    notify_conn = data_service.get_db()
+    try:
+        ensure_push_outbox_table(notify_conn)
+        enqueue_push_job(
+            notify_conn,
+            EVENT_ROLE_PUSH,
+            'roles',
+            recipient_id='teacher,admin',
+            payload={
+                'roles': ['teacher', 'admin'],
+                'title': '',
+                'body': '',
+                'data': {
+                    'type': 'data_updated',
+                    'dataType': 'class_journal',
+                    'className': class_name,
+                    'date': date,
+                    'updatedAt': result.get('updatedAt', ''),
+                },
+            },
+            idempotency_key=f'class_journal_data_updated:{class_name}:{date}:{result.get("updatedAt", "")}',
+        )
+        notify_conn.commit()
+    except Exception as e:
+        notify_conn.rollback()
+        print(f'[Journal] data_updated outbox error: {e}')
+    finally:
+        notify_conn.close()
 
     return jsonify(result)
 
@@ -117,37 +134,28 @@ def publish_journal(class_name, date):
     student_names = data.get('studentNames', {})
     sent_by = data.get('sentBy')
 
-    # 1. Mark class journal as published
-    data_service.publish_class_journal(class_name, date)
-
-    # 2. Batch UPSERT contact_books: create if missing, upgrade draft → notified
+    # Mark the journal, contact books, notification log, and outbox jobs together.
     now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S+08:00')
-    year, month = int(date.split('-')[0]), int(date.split('-')[1])
+    notified_count = 0
     conn = data_service.get_db()
     try:
+        ensure_scheduled_contact_book_notifications_table(conn)
+        conn.execute(
+            'UPDATE class_journals SET notified_at = ? WHERE class_name = ? AND date = ?',
+            (now, class_name, date),
+        )
         for sid in student_ids:
-            row = conn.execute(
-                'SELECT id, status, notified_at, read_at, signed_at FROM contact_books WHERE student_id = ? AND date = ?',
-                (sid, date)
-            ).fetchone()
-            if not row:
-                # No record yet — create a minimal notified entry
-                conn.execute('''
-                    INSERT INTO contact_books (student_id, date, year, month, status, notified_at)
-                    VALUES (?, ?, ?, ?, 'notified', ?)
-                ''', (sid, date, year, month, now))
-            else:
-                current_status = _canonical_contact_book_status(row)
-                if current_status == 'draft':
-                    conn.execute(
-                        'UPDATE contact_books SET status = ?, notified_at = ? WHERE id = ?',
-                        ('notified', now, row['id'])
-                    )
-                elif row['status'] != current_status:
-                    conn.execute(
-                        'UPDATE contact_books SET status = ? WHERE id = ?',
-                        (current_status, row['id'])
-                    )
+            publish_result = publish_contact_book_in_transaction(
+                conn,
+                sid,
+                date,
+                class_name=class_name,
+                student_name=student_names.get(sid, sid),
+                sent_by=sent_by or '',
+                mode='class_journal',
+            )
+            if not publish_result['alreadyPublished']:
+                notified_count += 1
 
         # Record notification log
         conn.execute('''
@@ -155,25 +163,13 @@ def publish_journal(class_name, date):
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (class_name, date, len(student_ids), json.dumps(student_ids), sent_by, now))
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
-    # 3. Send push notifications in background
-    notified_count = 0
-    if student_ids:
-        def _send_notifications():
-            from services.send_notification import notify_parents_new_record
-            for sid in student_ids:
-                s_name = student_names.get(sid, sid)
-                try:
-                    notify_parents_new_record(data_service, sid, s_name, date)
-                except Exception as e:
-                    print(f"[publish] notify error for {sid}: {e}")
-
-        threading.Thread(target=_send_notifications, daemon=True).start()
-        notified_count = len(student_ids)
-
-    return jsonify({'published': True, 'notifiedCount': notified_count, 'sentAt': now})
+    return jsonify({'published': True, 'notifiedCount': notified_count, 'deliveryQueued': notified_count, 'sentAt': now})
 
 
 @journal_bp.route('/student/<student_id>/<date>', methods=['GET'])

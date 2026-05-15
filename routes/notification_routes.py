@@ -6,6 +6,10 @@ from services.teacher_notification_store import (
     get_unread_count,
     serialize_teacher_notification,
 )
+from services.contact_book_publish_service import (
+    ensure_scheduled_contact_book_notifications_table,
+    publish_contact_book_in_transaction,
+)
 import json
 import os
 import traceback
@@ -741,8 +745,6 @@ def get_pending_notifications():
 @notification_bp.route('/send-batch', methods=['POST'])
 def send_batch_notifications():
     """Send contact book notifications in batch for completed but un-notified entries."""
-    import threading
-
     data = request.json or {}
     student_ids = data.get('studentIds', [])
     date_filter = data.get('date')
@@ -754,7 +756,7 @@ def send_batch_notifications():
     conn = None
     try:
         conn = data_service.get_db()
-        placeholders = ','.join('?' for _ in student_ids)
+        ensure_scheduled_contact_book_notifications_table(conn)
 
         now = datetime.now().isoformat()
         sent_count = 0
@@ -767,54 +769,27 @@ def send_batch_notifications():
                 (now, class_name, target_date)
             )
 
-        try:
-            from services.send_notification import notify_parents_new_record
-        except Exception:
-            return jsonify({'error': 'Notification service unavailable'}), 500
-
         for sid in student_ids:
             if not target_date:
                 continue
-            row = conn.execute(
-                'SELECT id, status, notified_at, read_at, signed_at FROM contact_books WHERE student_id = ? AND date = ?',
-                (sid, target_date)
-            ).fetchone()
-
-            current_status = _canonical_contact_book_status(row)
-            if current_status in ('notified', 'read', 'signed'):
-                if row and row['status'] != current_status:
-                    conn.execute(
-                        'UPDATE contact_books SET status = ? WHERE id = ?',
-                        (current_status, row['id'])
-                    )
-                continue  # Already notified, skip
-
-            if not row:
-                # No record yet — create a minimal notified entry
-                year, month = int(target_date.split('-')[0]), int(target_date.split('-')[1])
-                conn.execute('''
-                    INSERT INTO contact_books (student_id, date, year, month, status, notified_at)
-                    VALUES (?, ?, ?, ?, 'notified', ?)
-                ''', (sid, target_date, year, month, now))
-            else:
-                # draft → notified
-                conn.execute(
-                    'UPDATE contact_books SET status = ?, notified_at = COALESCE(notified_at, ?) WHERE id = ?',
-                    ('notified', now, row['id'])
-                )
-
             student_name = student_names.get(sid, sid)
-            def _send(s_id=sid, s_name=student_name, s_date=target_date):
-                try:
-                    notify_parents_new_record(data_service, s_id, s_name, s_date)
-                except Exception as e:
-                    print(f'[Notification] Batch send error for {s_id}: {e}')
-            threading.Thread(target=_send, daemon=True).start()
-            sent_count += 1
+            publish_result = publish_contact_book_in_transaction(
+                conn,
+                sid,
+                target_date,
+                class_name=class_name or '',
+                student_name=student_name,
+                sent_by=data.get('sentBy') or '',
+                mode='batch',
+            )
+            if not publish_result['alreadyPublished']:
+                sent_count += 1
 
         conn.commit()
-        return jsonify({'sent': sent_count, 'total': len(student_ids)}), 200
+        return jsonify({'sent': sent_count, 'total': len(student_ids), 'deliveryQueued': sent_count}), 200
     except Exception as e:
+        if conn:
+            conn.rollback()
         return jsonify({'error': str(e)}), 500
     finally:
         if conn:

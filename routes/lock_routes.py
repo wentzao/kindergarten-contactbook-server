@@ -15,12 +15,13 @@ Ownership model (v2):
 Locks auto-expire after LOCK_TTL_MINUTES. Frontend sends heartbeats to keep alive.
 """
 from flask import Blueprint, request, jsonify
-import os, json, threading
+import os, json
 from datetime import datetime, timedelta
 
 lock_bp = Blueprint('locks', __name__)
 
 from services.data_service import DataService
+from services.push_outbox_service import EVENT_ROLE_PUSH, enqueue_push_job, ensure_push_outbox_table
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 data_service = DataService(DATA_DIR)
 
@@ -72,21 +73,33 @@ def _is_expired(expires_at_str):
 
 def _send_lock_notification(lock_type, lock_key, locked_by_name, lock_owner_id='', exclude_user=None):
     """Send silent FCM to all teachers/admins about lock state change."""
-    def _send():
-        try:
-            from services.send_notification import send_to_role
-            data = {
-                'type': lock_type,        # 'lock_acquired' | 'lock_released'
-                'lockKey': lock_key,
-                'lockedBy': locked_by_name or '',
-                'lockOwnerId': lock_owner_id or '',
-            }
-            send_to_role(data_service, 'teacher', '', '', data)
-            send_to_role(data_service, 'admin', '', '', data)
-        except Exception as e:
-            print(f'[Lock] FCM notification error: {e}')
-
-    threading.Thread(target=_send, daemon=True).start()
+    conn = data_service.get_db()
+    try:
+        ensure_push_outbox_table(conn)
+        enqueue_push_job(
+            conn,
+            EVENT_ROLE_PUSH,
+            'roles',
+            recipient_id='teacher,admin',
+            payload={
+                'roles': ['teacher', 'admin'],
+                'title': '',
+                'body': '',
+                'data': {
+                    'type': lock_type,
+                    'lockKey': lock_key,
+                    'lockedBy': locked_by_name or '',
+                    'lockOwnerId': lock_owner_id or '',
+                },
+            },
+            idempotency_key=f'lock:{lock_type}:{lock_key}:{lock_owner_id}:{datetime.now().isoformat()}',
+        )
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f'[Lock] outbox notification error: {e}')
+    finally:
+        conn.close()
 
 
 # ── Clean expired locks ──

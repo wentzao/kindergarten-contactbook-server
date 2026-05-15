@@ -55,7 +55,11 @@ collab_sock.init_app(app)
 # Drop legacy tables that are no longer used by the application
 def _run_startup_migrations():
     import sqlite3
-    db_path = os.path.join(os.path.dirname(__file__), 'kindergarten.db')
+    db_path = (
+        os.environ.get('KINDERGARTEN_DB_PATH')
+        or os.environ.get('DB_PATH')
+        or os.path.join(os.path.dirname(__file__), 'kindergarten.db')
+    )
     try:
         conn = sqlite3.connect(db_path)
         conn.execute('DROP TABLE IF EXISTS parent_student_relations')

@@ -21,7 +21,12 @@ class DataService:
     
     def __init__(self, data_dir):
         # We don't use data_dir much anymore, but keep it for config
-        self.db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'kindergarten.db')
+        default_db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'kindergarten.db')
+        self.db_path = (
+            os.environ.get('KINDERGARTEN_DB_PATH')
+            or os.environ.get('DB_PATH')
+            or default_db_path
+        )
         self._ensure_schema()
 
     def get_db(self):

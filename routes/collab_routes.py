@@ -20,6 +20,7 @@ import uuid
 from datetime import datetime
 
 from services.data_service import DataService
+from services.push_outbox_service import EVENT_ROLE_PUSH, enqueue_push_job, ensure_push_outbox_table
 
 
 collab_bp = Blueprint('collab', __name__)
@@ -573,31 +574,47 @@ def _save_note_snapshot(parsed, snapshot):
 
 
 def _send_data_updated(parsed, result):
-    def _notify():
-        try:
-            from services.send_notification import send_to_role
-            if parsed['kind'] == 'note':
-                notify_data = {
-                    'type': 'data_updated',
-                    'dataType': 'student_notes',
-                    'date': parsed['date'],
-                    'studentIds': json.dumps([parsed['studentId']], ensure_ascii=False),
-                    'updatedAt': result.get('updatedAt', ''),
-                }
-            else:
-                notify_data = {
-                    'type': 'data_updated',
-                    'dataType': 'class_journal',
-                    'className': parsed['className'],
-                    'date': parsed['date'],
-                    'updatedAt': result.get('updatedAt', ''),
-                }
-            send_to_role(data_service, 'teacher', '', '', notify_data)
-            send_to_role(data_service, 'admin', '', '', notify_data)
-        except Exception as e:
-            print(f'[Collab] data_updated notification error: {e}')
+    if parsed['kind'] == 'note':
+        notify_data = {
+            'type': 'data_updated',
+            'dataType': 'student_notes',
+            'date': parsed['date'],
+            'studentIds': json.dumps([parsed['studentId']], ensure_ascii=False),
+            'updatedAt': result.get('updatedAt', ''),
+        }
+        key = f'collab_note_updated:{parsed["studentId"]}:{parsed["date"]}:{result.get("updatedAt", "")}'
+    else:
+        notify_data = {
+            'type': 'data_updated',
+            'dataType': 'class_journal',
+            'className': parsed['className'],
+            'date': parsed['date'],
+            'updatedAt': result.get('updatedAt', ''),
+        }
+        key = f'collab_journal_updated:{parsed["className"]}:{parsed["date"]}:{result.get("updatedAt", "")}'
 
-    threading.Thread(target=_notify, daemon=True).start()
+    conn = data_service.get_db()
+    try:
+        ensure_push_outbox_table(conn)
+        enqueue_push_job(
+            conn,
+            EVENT_ROLE_PUSH,
+            'roles',
+            recipient_id='teacher,admin',
+            payload={
+                'roles': ['teacher', 'admin'],
+                'title': '',
+                'body': '',
+                'data': notify_data,
+            },
+            idempotency_key=key,
+        )
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f'[Collab] data_updated outbox error: {e}')
+    finally:
+        conn.close()
 
 
 @collab_bp.route('/documents/<path:document_id>/bootstrap', methods=['GET'])

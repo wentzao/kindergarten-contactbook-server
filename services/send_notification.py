@@ -41,7 +41,11 @@ except Exception:
     crypto_utils = None
     hashes = None
 
-_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'kindergarten.db')
+_DB_PATH = (
+    os.environ.get('KINDERGARTEN_DB_PATH')
+    or os.environ.get('DB_PATH')
+    or os.path.join(os.path.dirname(os.path.dirname(__file__)), 'kindergarten.db')
+)
 
 
 def lookup_student_name(student_id):

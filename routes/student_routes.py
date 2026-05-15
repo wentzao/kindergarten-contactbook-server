@@ -7,7 +7,11 @@ from datetime import datetime
 student_bp = Blueprint('student_bp', __name__)
 
 # Student name cache DB path
-_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'kindergarten.db')
+_DB_PATH = (
+    os.environ.get('KINDERGARTEN_DB_PATH')
+    or os.environ.get('DB_PATH')
+    or os.path.join(os.path.dirname(os.path.dirname(__file__)), 'kindergarten.db')
+)
 
 def _cache_student_names(students):
     """Cache student names in the database for notification lookups."""
