@@ -12,6 +12,7 @@ This blueprint orchestrates cleanup across both the SQLite DB and the external
 image server. The image server itself stays domain-agnostic — it only knows how
 to delete folders by path.
 """
+import json
 import os
 import sqlite3
 from flask import Blueprint, jsonify, request
@@ -153,7 +154,126 @@ def _delete_image_folders(student_id):
     return results
 
 
+def _parse_student_ids(raw_value):
+    if not raw_value:
+        return []
+    try:
+        decoded = json.loads(raw_value)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(decoded, list):
+        return []
+    return [str(sid) for sid in decoded if sid is not None and str(sid).strip()]
+
+
+def _mask_push_token(token):
+    token = str(token or '')
+    if len(token) <= 18:
+        return token
+    return f'{token[:12]}...{token[-6:]}'
+
+
+def _parent_push_scope_for_student(conn, student_id):
+    normalized_student_id = str(student_id)
+    token_rows = conn.execute(
+        '''
+        SELECT id, user_id, push_token, device_name, role, provider, platform,
+               environment, bundle_id, student_ids, created_at, updated_at
+        FROM push_tokens
+        WHERE role = 'parent'
+        ORDER BY updated_at DESC, id DESC
+        '''
+    ).fetchall()
+
+    bound_user_ids = set()
+    try:
+        binding_rows = conn.execute(
+            '''
+            SELECT DISTINCT user_id
+            FROM student_bindings
+            WHERE CAST(student_id AS TEXT) = ?
+            ''',
+            (normalized_student_id,),
+        ).fetchall()
+        bound_user_ids = {str(row['user_id']) for row in binding_rows if row['user_id']}
+    except sqlite3.OperationalError:
+        bound_user_ids = set()
+
+    opted_out = set()
+    try:
+        pref_rows = conn.execute(
+            'SELECT user_id FROM notification_preferences WHERE contact_book_notify = 0'
+        ).fetchall()
+        opted_out = {str(row['user_id']) for row in pref_rows if row['user_id']}
+    except sqlite3.OperationalError:
+        opted_out = set()
+
+    matched = []
+    parent_tokens_with_student_ids = 0
+    parent_tokens_without_student_ids = 0
+    for row in token_rows:
+        student_ids = _parse_student_ids(row['student_ids'])
+        if student_ids:
+            parent_tokens_with_student_ids += 1
+        else:
+            parent_tokens_without_student_ids += 1
+
+        user_id = str(row['user_id'] or '')
+        matched_by = []
+        if normalized_student_id in set(student_ids):
+            matched_by.append('push_token.student_ids')
+        if user_id in bound_user_ids:
+            matched_by.append('student_bindings')
+        if not matched_by:
+            continue
+
+        matched.append({
+            'id': row['id'],
+            'userId': user_id,
+            'deviceName': row['device_name'],
+            'provider': row['provider'],
+            'platform': row['platform'],
+            'environment': row['environment'],
+            'bundleId': row['bundle_id'],
+            'studentIds': student_ids,
+            'matchedBy': matched_by,
+            'contactBookNotifyOptedOut': user_id in opted_out,
+            'pushTokenMasked': _mask_push_token(row['push_token']),
+            'createdAt': row['created_at'],
+            'updatedAt': row['updated_at'],
+        })
+
+    deliverable = [row for row in matched if not row['contactBookNotifyOptedOut']]
+    return {
+        'studentId': normalized_student_id,
+        'dbPath': data_service.db_path,
+        'parentTokenCount': len(token_rows),
+        'parentTokensWithStudentIds': parent_tokens_with_student_ids,
+        'parentTokensWithoutStudentIds': parent_tokens_without_student_ids,
+        'boundParentUserCount': len(bound_user_ids),
+        'matchedTokenCount': len(matched),
+        'deliverableTokenCount': len(deliverable),
+        'matchedUserCount': len({row['userId'] for row in matched if row['userId']}),
+        'optedOutMatchedTokenCount': len(matched) - len(deliverable),
+        'tokens': matched,
+    }
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
+
+@admin_bp.route('/push-token-scope/student/<student_id>', methods=['GET'])
+@require_admin
+def push_token_scope_student(student_id):
+    """Report which parent push tokens would receive a contact-book push."""
+    student_id = student_id.strip()
+    if not student_id:
+        return jsonify({'error': 'student_id is required'}), 400
+
+    conn = data_service.get_db()
+    try:
+        return jsonify(_parent_push_scope_for_student(conn, student_id)), 200
+    finally:
+        conn.close()
 
 @admin_bp.route('/student/<student_id>/footprint', methods=['GET'])
 @require_admin

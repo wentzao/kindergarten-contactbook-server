@@ -641,35 +641,59 @@ def send_to_student_parents(data_service, student_id, title, body, data=None, pr
     If pref_column is provided (e.g. 'contact_book_notify'), users who have opted out
     of that notification type will be excluded.
     """
+    normalized_student_id = str(student_id)
     conn = data_service.get_db()
     try:
         rows = conn.execute(
             '''
             SELECT DISTINCT push_token, user_id, student_ids, provider, platform, environment, bundle_id
             FROM push_tokens
-            WHERE role = 'parent' AND student_ids IS NOT NULL
+            WHERE role = 'parent'
             ''',
         ).fetchall()
+
+        bound_user_ids = set()
+        try:
+            binding_rows = conn.execute(
+                '''
+                SELECT DISTINCT user_id
+                FROM student_bindings
+                WHERE CAST(student_id AS TEXT) = ?
+                ''',
+                (normalized_student_id,),
+            ).fetchall()
+            bound_user_ids = {str(r['user_id']) for r in binding_rows if r['user_id']}
+        except sqlite3.OperationalError:
+            bound_user_ids = set()
 
         # Build set of opted-out user_ids
         _VALID_PREF_COLUMNS = {'contact_book_notify', 'announcement_notify'}
         opted_out = set()
         if pref_column and pref_column in _VALID_PREF_COLUMNS:
-            pref_rows = conn.execute(
-                f"SELECT user_id FROM notification_preferences WHERE {pref_column} = 0"
-            ).fetchall()
-            opted_out = {r['user_id'] for r in pref_rows}
+            try:
+                pref_rows = conn.execute(
+                    f"SELECT user_id FROM notification_preferences WHERE {pref_column} = 0"
+                ).fetchall()
+                opted_out = {str(r['user_id']) for r in pref_rows if r['user_id']}
+            except sqlite3.OperationalError:
+                opted_out = set()
 
         target_rows = []
         for r in rows:
             try:
                 sids = json.loads(r['student_ids']) if r['student_ids'] else []
-                if student_id in sids:
-                    if pref_column and r['user_id'] in opted_out:
+                if not isinstance(sids, list):
+                    sids = []
+                normalized_sids = {str(sid) for sid in sids}
+                user_id = str(r['user_id'] or '')
+                if normalized_student_id in normalized_sids or user_id in bound_user_ids:
+                    if pref_column and user_id in opted_out:
                         continue
                     target_rows.append(r)
             except (json.JSONDecodeError, TypeError):
                 continue
+        if not target_rows:
+            print(f'[PushScope] No parent push tokens matched student {normalized_student_id}')
         return send_to_push_rows(target_rows, title, body, data)
     finally:
         conn.close()

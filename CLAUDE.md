@@ -176,5 +176,8 @@ pending_teacher  →  pending_parent  →  read  →  signed
 ### 通知觸發
 - 聯絡簿發布使用 `push_outbox` durable outbox：單一學生發布、批次通知、班級日誌發布都會把聯絡簿狀態、發布事件、推播任務在同一個 transaction 內提交，再由 background worker claim / retry。
 - 公告、聯絡簿留言/刪除、家長讀取/簽名狀態、教師端 data_updated、lock/collab silent push 也已收斂到 `push_outbox`。
+- 家長聯絡簿可見通知（發布、公告、老師留言、老師刪除留言）若解析不到任何可投遞 token，outbox 會記錄錯誤並進入重試，達上限後才標成 failed；不再以 `sentCount=0` 偽裝成功，方便管理端重送與追查。
+- 針對單一學生的家長推播範圍同時參考 `push_tokens.student_ids` 與 `student_bindings`；前者是裝置註冊快照，後者是 LINE 家長帳號與學生的持久綁定，兩者任一符合就會納入候選，並仍尊重 `notification_preferences.contact_book_notify`。
 - 仍保留的 `threading.Thread` 主要是 outbox/scheduler worker、Expo receipt 延遲檢查，以及家長頭像快取抓取；它們不再承擔主要資料狀態變更後的通知投遞責任。
 - 管理端 outbox API 位於 `/api/admin/outbox*`，需 `X-Admin-Token`：可查 summary/list、重送單筆、批次重送 failed、取消 job、手動 process 一次。
+- 管理端可用 `GET /api/admin/push-token-scope/student/<student_id>` 檢查某位學生目前會命中哪些家長裝置 token、是否因通知偏好被排除，以及是透過 token 內 studentIds 或 student_bindings 命中。

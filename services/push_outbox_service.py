@@ -27,6 +27,13 @@ EVENT_CONTACT_BOOK_TEACHER_COMMENT_DELETED = 'contact_book_teacher_comment_delet
 EVENT_ROLE_PUSH = 'role_push'
 EVENT_TEACHER_USER_IDS_PUSH = 'teacher_user_ids_push'
 
+REQUIRE_DELIVERY_SUCCESS_EVENT_TYPES = {
+    EVENT_CONTACT_BOOK_PARENT_UPDATE,
+    EVENT_ANNOUNCEMENT,
+    EVENT_CONTACT_BOOK_PARENT_COMMENT,
+    EVENT_CONTACT_BOOK_PARENT_COMMENT_DELETED,
+}
+
 _WORKER_STARTED = False
 _WORKER_LOCK = threading.Lock()
 
@@ -238,9 +245,9 @@ def retry_push_outbox_job(conn, job_id):
         '''
         UPDATE push_outbox
         SET status = ?, attempts = 0, next_attempt_at = ?, last_error = NULL, updated_at = ?
-        WHERE id = ? AND status IN (?, ?, ?)
+        WHERE id = ? AND status IN (?, ?, ?, ?)
         ''',
-        (OUTBOX_PENDING, now, now, job_id, OUTBOX_FAILED, OUTBOX_SENDING, OUTBOX_CANCELLED),
+        (OUTBOX_PENDING, now, now, job_id, OUTBOX_FAILED, OUTBOX_SENDING, OUTBOX_CANCELLED, OUTBOX_SENT),
     )
     row = conn.execute('SELECT * FROM push_outbox WHERE id = ?', (job_id,)).fetchone()
     return cursor.rowcount, serialize_push_outbox_job(row)
@@ -539,6 +546,11 @@ def process_push_outbox(data_service, limit=50):
             break
         try:
             sent_count = _send_job(data_service, job)
+            if (
+                sent_count <= 0
+                and job.get('event_type') in REQUIRE_DELIVERY_SUCCESS_EVENT_TYPES
+            ):
+                raise RuntimeError('No push recipients matched or provider accepted 0 messages')
             _mark_job_sent(data_service, job, sent_count)
         except Exception as e:
             error = str(e)
