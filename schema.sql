@@ -181,6 +181,26 @@ CREATE TABLE notification_preferences (
     updated_at VARCHAR(50)
 );
 
+DROP TABLE IF EXISTS teacher_notifications;
+CREATE TABLE teacher_notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipient_user_id VARCHAR(100) NOT NULL,
+    type VARCHAR(100) NOT NULL,
+    title VARCHAR(200),
+    body TEXT,
+    student_id VARCHAR(50),
+    date VARCHAR(20),
+    class_name VARCHAR(100),
+    status VARCHAR(50),
+    payload TEXT,
+    read_at VARCHAR(50),
+    created_at VARCHAR(50) NOT NULL
+);
+CREATE INDEX idx_teacher_notifications_recipient_created
+    ON teacher_notifications(recipient_user_id, created_at);
+CREATE INDEX idx_teacher_notifications_recipient_read
+    ON teacher_notifications(recipient_user_id, read_at);
+
 DROP TABLE IF EXISTS class_journals;
 CREATE TABLE class_journals (
     id VARCHAR(50) PRIMARY KEY,

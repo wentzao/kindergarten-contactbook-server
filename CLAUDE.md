@@ -55,11 +55,12 @@ kindergarten-contactbook/
 │   ├── med_routes.py            # 用藥記錄
 │   ├── news_routes.py           # 公告管理
 │   ├── survey_routes.py         # 問卷調查
-│   ├── notification_routes.py   # FCM token、偏好設定、未讀留言
+│   ├── notification_routes.py   # Push token、偏好設定、教師通知 inbox、未讀留言
 │   └── student_routes.py        # 教師班級/學生資訊代理
 ├── services/
 │   ├── data_service.py          # SQLite 資料存取抽象層
-│   └── send_notification.py     # FCM 推播發送
+│   ├── send_notification.py     # FCM/Expo/APNs 推播發送
+│   └── teacher_notification_store.py # 教師端通知 inbox 持久化
 ├── templates/
 │   └── photo_view.html          # 相片檢視 HTML 頁面
 ├── static/                      # 靜態資源與上傳檔案
@@ -109,8 +110,9 @@ python test_api.py
 | `news` | 校園公告 |
 | `surveys` | 問卷定義 |
 | `survey_responses` | 問卷填答結果 |
-| `push_tokens` | FCM 裝置 token |
+| `push_tokens` | FCM/Expo/APNs 裝置 token |
 | `notification_preferences` | 使用者通知偏好 |
+| `teacher_notifications` | 教師端通知 inbox、已讀與 badge 計數 |
 | `teacher_comment_reads` | 教師已讀留言追蹤 |
 
 ---

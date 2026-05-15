@@ -1,6 +1,11 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 from services.data_service import DataService
+from services.teacher_notification_store import (
+    ensure_teacher_notifications_table,
+    get_unread_count,
+    serialize_teacher_notification,
+)
 import json
 import os
 import traceback
@@ -112,6 +117,7 @@ def ensure_tables():
             );
             CREATE INDEX IF NOT EXISTS idx_nlog_class_date ON notification_logs(class_name, date);
         ''')
+        ensure_teacher_notifications_table(conn)
         # Migration: add role column if it doesn't exist
         try:
             conn.execute('ALTER TABLE push_tokens ADD COLUMN role VARCHAR(20) DEFAULT \'parent\'')
@@ -260,7 +266,7 @@ def clear_all_tokens():
 
 @notification_bp.route('/push-token', methods=['DELETE'])
 def remove_push_token():
-    """Remove a FCM push token (on user logout)."""
+    """Remove a push token or a teacher/admin token channel on logout."""
     data = request.json
     if not data:
         return jsonify({'error': 'No data provided'}), 400
@@ -268,17 +274,208 @@ def remove_push_token():
     user_id = data.get('userId')
     push_token = data.get('pushToken')
 
-    if not user_id or not push_token:
-        return jsonify({'error': 'userId and pushToken are required'}), 400
+    if not user_id:
+        return jsonify({'error': 'userId is required'}), 400
 
     conn = data_service.get_db()
     try:
-        conn.execute(
-            'DELETE FROM push_tokens WHERE user_id = ? AND push_token = ?',
-            (user_id, push_token)
-        )
+        if push_token:
+            cursor = conn.execute(
+                'DELETE FROM push_tokens WHERE user_id = ? AND push_token = ?',
+                (user_id, push_token)
+            )
+        else:
+            filters = []
+            params = [user_id]
+            for body_key, column in (
+                ('role', 'role'),
+                ('provider', 'provider'),
+                ('platform', 'platform'),
+                ('environment', 'environment'),
+                ('bundleId', 'bundle_id'),
+                ('bundleID', 'bundle_id'),
+            ):
+                value = data.get(body_key)
+                if value:
+                    filters.append(f'COALESCE({column}, \'\') = ?')
+                    params.append(str(value).strip())
+
+            if not filters:
+                return jsonify({'error': 'pushToken or channel metadata is required'}), 400
+
+            cursor = conn.execute(
+                f'DELETE FROM push_tokens WHERE user_id = ? AND {" AND ".join(filters)}',
+                params,
+            )
         conn.commit()
-        return jsonify({'status': 'ok', 'message': 'Push token removed'}), 200
+        return jsonify({
+            'status': 'ok',
+            'message': 'Push token removed',
+            'removed': cursor.rowcount,
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+# ==========================================
+# Teacher Notification Inbox API
+# ==========================================
+
+@notification_bp.route('/teacher', methods=['GET'])
+def get_teacher_notifications():
+    """Get persisted teacher/admin notification inbox rows."""
+    user_id = request.args.get('userId') or request.args.get('teacherId')
+    if not user_id:
+        return jsonify({'error': 'userId parameter is required'}), 400
+
+    try:
+        limit = min(max(int(request.args.get('limit', 100)), 1), 200)
+    except ValueError:
+        return jsonify({'error': 'limit must be a number'}), 400
+
+    since = request.args.get('since')
+    conn = data_service.get_db()
+    try:
+        ensure_teacher_notifications_table(conn)
+        conditions = ['recipient_user_id = ?']
+        params = [user_id]
+        if since:
+            conditions.append('created_at > ?')
+            params.append(since)
+
+        rows = conn.execute(
+            f'''
+            SELECT *
+            FROM teacher_notifications
+            WHERE {' AND '.join(conditions)}
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            ''',
+            (*params, limit),
+        ).fetchall()
+
+        return jsonify({
+            'notifications': [serialize_teacher_notification(row) for row in rows],
+            'unreadCount': get_unread_count(conn, user_id),
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@notification_bp.route('/teacher/unread-count', methods=['GET'])
+def get_teacher_unread_count():
+    """Get unread teacher/admin notification count for badge sync."""
+    user_id = request.args.get('userId') or request.args.get('teacherId')
+    if not user_id:
+        return jsonify({'error': 'userId parameter is required'}), 400
+
+    conn = data_service.get_db()
+    try:
+        return jsonify({'userId': user_id, 'unreadCount': get_unread_count(conn, user_id)}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@notification_bp.route('/teacher/read', methods=['POST'])
+def mark_teacher_notifications_read():
+    """Mark selected or all teacher/admin inbox notifications as read."""
+    data = request.json or {}
+    user_id = data.get('userId') or data.get('teacherId')
+    if not user_id:
+        return jsonify({'error': 'userId is required'}), 400
+
+    notification_ids = data.get('notificationIds') or data.get('ids') or []
+    read_all = bool(data.get('readAll'))
+    now = datetime.now().isoformat()
+
+    conn = data_service.get_db()
+    try:
+        ensure_teacher_notifications_table(conn)
+        if read_all:
+            cursor = conn.execute(
+                '''
+                UPDATE teacher_notifications
+                SET read_at = COALESCE(read_at, ?)
+                WHERE recipient_user_id = ? AND read_at IS NULL
+                ''',
+                (now, user_id),
+            )
+        else:
+            normalized_ids = [int(nid) for nid in notification_ids if str(nid).strip()]
+            if not normalized_ids:
+                return jsonify({'error': 'notificationIds or readAll is required'}), 400
+
+            placeholders = ','.join('?' for _ in normalized_ids)
+            cursor = conn.execute(
+                f'''
+                UPDATE teacher_notifications
+                SET read_at = COALESCE(read_at, ?)
+                WHERE recipient_user_id = ? AND id IN ({placeholders})
+                ''',
+                (now, user_id, *normalized_ids),
+            )
+
+        conn.commit()
+        return jsonify({
+            'status': 'ok',
+            'updated': cursor.rowcount,
+            'unreadCount': get_unread_count(conn, user_id),
+        }), 200
+    except ValueError:
+        return jsonify({'error': 'notificationIds must be numeric'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@notification_bp.route('/teacher', methods=['DELETE'])
+def delete_teacher_notifications():
+    """Delete selected or all teacher/admin inbox notifications."""
+    data = request.json or {}
+    user_id = data.get('userId') or data.get('teacherId')
+    if not user_id:
+        return jsonify({'error': 'userId is required'}), 400
+
+    notification_ids = data.get('notificationIds') or data.get('ids') or []
+    delete_all = bool(data.get('deleteAll'))
+
+    conn = data_service.get_db()
+    try:
+        ensure_teacher_notifications_table(conn)
+        if delete_all:
+            cursor = conn.execute(
+                'DELETE FROM teacher_notifications WHERE recipient_user_id = ?',
+                (user_id,),
+            )
+        else:
+            normalized_ids = [int(nid) for nid in notification_ids if str(nid).strip()]
+            if not normalized_ids:
+                return jsonify({'error': 'notificationIds or deleteAll is required'}), 400
+
+            placeholders = ','.join('?' for _ in normalized_ids)
+            cursor = conn.execute(
+                f'''
+                DELETE FROM teacher_notifications
+                WHERE recipient_user_id = ? AND id IN ({placeholders})
+                ''',
+                (user_id, *normalized_ids),
+            )
+
+        conn.commit()
+        return jsonify({
+            'status': 'ok',
+            'deleted': cursor.rowcount,
+            'unreadCount': get_unread_count(conn, user_id),
+        }), 200
+    except ValueError:
+        return jsonify({'error': 'notificationIds must be numeric'}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:

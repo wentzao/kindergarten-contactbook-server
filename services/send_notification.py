@@ -13,6 +13,11 @@ import time
 import subprocess
 import requests
 
+from services.teacher_notification_store import (
+    create_teacher_notifications,
+    get_unread_counts,
+)
+
 # Keep Python 3.8 runtime quiet before migration; this warning is informational.
 if sys.version_info[:2] == (3, 8):
     warnings.filterwarnings(
@@ -247,6 +252,12 @@ def _build_apns_request(row, title, body, data, jwt_token):
             'alert': {'title': title, 'body': body or ''},
             'sound': 'default',
         }
+        try:
+            badge = int((data or {}).get('badge', 0))
+            if badge >= 0:
+                alert_payload['aps']['badge'] = badge
+        except (TypeError, ValueError):
+            pass
     else:
         alert_payload['aps'] = {'content-available': 1}
 
@@ -527,15 +538,48 @@ def send_to_teacher_user_ids(data_service, user_ids, title, body, data=None):
     conn = data_service.get_db()
     try:
         placeholders = ','.join('?' for _ in normalized)
+        opt_out_rows = conn.execute(f'''
+            SELECT user_id
+            FROM notification_preferences
+            WHERE user_id IN ({placeholders}) AND contact_book_notify = 0
+        ''', normalized).fetchall()
+        opted_out = {row['user_id'] for row in opt_out_rows}
+        enabled_user_ids = [user_id for user_id in normalized if user_id not in opted_out]
+        if not enabled_user_ids:
+            return 0
+
+        enabled_placeholders = ','.join('?' for _ in enabled_user_ids)
         rows = conn.execute(f'''
             SELECT DISTINCT pt.push_token, pt.provider, pt.platform, pt.environment, pt.bundle_id, pt.user_id
             FROM push_tokens pt
-            LEFT JOIN notification_preferences np ON np.user_id = pt.user_id
-            WHERE pt.user_id IN ({placeholders})
+            WHERE pt.user_id IN ({enabled_placeholders})
               AND pt.role IN ('teacher', 'admin')
-              AND COALESCE(np.contact_book_notify, 1) = 1
-        ''', normalized).fetchall()
-        return send_to_push_rows(rows, title, body, data)
+        ''', enabled_user_ids).fetchall()
+
+        rows_by_user_id = {}
+        for row in rows:
+            rows_by_user_id.setdefault(row['user_id'], []).append(row)
+
+        notification_results = {}
+        if title:
+            notification_results = create_teacher_notifications(conn, enabled_user_ids, title, body, data)
+            conn.commit()
+            badge_counts = {
+                user_id: result.get('unreadCount', 0)
+                for user_id, result in notification_results.items()
+            }
+        else:
+            badge_counts = get_unread_counts(conn, enabled_user_ids)
+
+        count = 0
+        for user_id, user_rows in rows_by_user_id.items():
+            data_with_badge = dict(data or {})
+            data_with_badge['badge'] = str(badge_counts.get(user_id, 0))
+            notification_id = notification_results.get(user_id, {}).get('notificationId')
+            if notification_id:
+                data_with_badge['notificationId'] = str(notification_id)
+            count += send_to_push_rows(user_rows, title, body, data_with_badge)
+        return count
     finally:
         conn.close()
 
