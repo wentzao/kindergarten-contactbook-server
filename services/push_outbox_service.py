@@ -24,6 +24,8 @@ EVENT_CONTACT_BOOK_TEACHER_COMMENT = 'contact_book_teacher_comment'
 EVENT_CONTACT_BOOK_TEACHER_STATUS = 'contact_book_teacher_status'
 EVENT_CONTACT_BOOK_PARENT_COMMENT_DELETED = 'contact_book_parent_comment_deleted'
 EVENT_CONTACT_BOOK_TEACHER_COMMENT_DELETED = 'contact_book_teacher_comment_deleted'
+EVENT_STUDENT_LEAVE_REQUEST = 'student_leave_request'
+EVENT_STUDENT_MED_REQUEST = 'student_med_request'
 EVENT_ROLE_PUSH = 'role_push'
 EVENT_TEACHER_USER_IDS_PUSH = 'teacher_user_ids_push'
 
@@ -434,6 +436,17 @@ def _send_job(data_service, job):
             payload.get('date') or '',
             payload.get('content') or '',
             payload.get('senderName') or '家長',
+            class_name=payload.get('className') or None,
+        )
+    if job['event_type'] in (EVENT_STUDENT_LEAVE_REQUEST, EVENT_STUDENT_MED_REQUEST):
+        from services.send_notification import notify_teachers_student_request
+
+        return notify_teachers_student_request(
+            data_service,
+            payload.get('studentId') or job['recipient_id'],
+            'leave' if job['event_type'] == EVENT_STUDENT_LEAVE_REQUEST else 'med',
+            payload.get('recordId') or '',
+            date=payload.get('date') or '',
             class_name=payload.get('className') or None,
         )
     if job['event_type'] == EVENT_ROLE_PUSH:

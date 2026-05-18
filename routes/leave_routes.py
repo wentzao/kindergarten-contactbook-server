@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from services.data_service import DataService
+from services.student_request_notification_service import enqueue_student_request_notification
 from datetime import datetime, date
 import os
 
@@ -87,6 +88,10 @@ def submit_leave_request():
         if not data or 'childId' not in data:
             return jsonify({'error': 'Missing childId'}), 400
         saved_record = data_service.save_student_record(data['childId'], 'leave', data)
+        try:
+            enqueue_student_request_notification(data_service, 'leave', saved_record)
+        except Exception as notify_error:
+            print(f"[Leave] teacher notification enqueue error: {notify_error}")
         return jsonify(saved_record), 201
     except Exception as e:
         print(f"[Leave] POST error: {str(e)}")
@@ -107,4 +112,3 @@ def delete_leave_request(leave_id):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-

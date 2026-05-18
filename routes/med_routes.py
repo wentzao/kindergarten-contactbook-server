@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from services.data_service import DataService
+from services.student_request_notification_service import enqueue_student_request_notification
 import os
 
 med_bp = Blueprint('meds', __name__)
@@ -20,6 +21,10 @@ def submit_med_request():
         return jsonify({'error': 'Missing childId'}), 400
 
     saved_record = data_service.save_student_record(data['childId'], 'meds', data)
+    try:
+        enqueue_student_request_notification(data_service, 'med', saved_record)
+    except Exception as notify_error:
+        print(f"[Meds] teacher notification enqueue error: {notify_error}")
     return jsonify(saved_record), 201
 
 

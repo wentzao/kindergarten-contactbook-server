@@ -882,6 +882,47 @@ def notify_teachers_status_update(data_service, student_id, student_name, date, 
     return count
 
 
+def notify_teachers_student_request(data_service, student_id, request_type, record_id='', date='', class_name=None):
+    """Notify responsible teachers when a parent submits a leave or medication request."""
+    student_name = lookup_student_name(student_id)
+    normalized_type = str(request_type or '').strip()
+
+    if normalized_type == 'med':
+        title = f'托藥委託：{student_name}'
+        body = f'{student_name} 的家長送出托藥委託'
+        payload_type = 'student_med_request'
+        request_label = '托藥委託'
+    else:
+        title = f'請假申請：{student_name}'
+        body = f'{student_name} 的家長送出請假申請'
+        payload_type = 'student_leave_request'
+        request_label = '請假'
+
+    data = {
+        'type': payload_type,
+        'studentId': str(student_id),
+        'studentName': str(student_name),
+        'recordId': str(record_id or ''),
+        'date': str(date or ''),
+        'requestKind': normalized_type,
+        'requestLabel': request_label,
+    }
+    if class_name:
+        data['className'] = str(class_name)
+
+    count = _send_to_responsible_teachers(
+        data_service,
+        student_id,
+        title,
+        body,
+        data,
+        class_name=class_name,
+    )
+    if count > 0:
+        print(f'[Push] Sent {payload_type} notification to {count} responsible teacher devices')
+    return count
+
+
 def notify_teachers_comment_deleted(data_service, student_id, date, content='', sender_name='家長', class_name=None):
     """Visible push notification to teachers/admins when a parent deletes a chat message.
 

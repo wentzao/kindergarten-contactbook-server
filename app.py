@@ -36,6 +36,7 @@ from routes.lock_routes import lock_bp
 from routes.parent_routes import parent_bp
 from routes.collab_routes import collab_bp, collab_sock
 from routes.admin_routes import admin_bp
+from routes.teacher_request_routes import teacher_requests_bp
 
 app.register_blueprint(leave_bp, url_prefix='/api/leave')
 app.register_blueprint(med_bp, url_prefix='/api/meds')
@@ -50,6 +51,7 @@ app.register_blueprint(lock_bp, url_prefix='/api/locks')
 app.register_blueprint(parent_bp, url_prefix='/api/parents')
 app.register_blueprint(collab_bp, url_prefix='/api/collab')
 app.register_blueprint(admin_bp, url_prefix='/api/admin')
+app.register_blueprint(teacher_requests_bp, url_prefix='/api/teacher-requests')
 collab_sock.init_app(app)
 
 # Drop legacy tables that are no longer used by the application
