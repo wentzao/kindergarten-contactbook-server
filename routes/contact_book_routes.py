@@ -26,6 +26,10 @@ from services.push_outbox_service import (
     enqueue_push_job,
     start_push_outbox_worker,
 )
+from services.contact_book_teacher_payload import (
+    merge_existing_visible_content_if_empty,
+    normalize_teacher_payload,
+)
 import os
 
 
@@ -301,6 +305,8 @@ def format_record(r, version='original', teacher_profiles=None, scheduled_notifi
     except (IndexError, KeyError):
         parent_signature_url = None
 
+    original_teacher = normalize_teacher_payload(load_json(r['original_teacher']))
+
     rec = {
         'date': date_str,
         'dayOfWeek': stored_dow,
@@ -313,7 +319,7 @@ def format_record(r, version='original', teacher_profiles=None, scheduled_notifi
         'returnedItems': load_json(r['returned_items']) or [],
         'attachedItems': load_json(r['attached_items']) or [],
         'original': {
-            'teacher': load_json(r['original_teacher']),
+            'teacher': original_teacher,
             'parent': load_json(r['original_parent'])
         },
         'redacted': load_json(r['redacted']),
@@ -330,6 +336,16 @@ def format_record(r, version='original', teacher_profiles=None, scheduled_notifi
     else:
         rec['teacher'] = rec['original'].get('teacher')
         rec['parent'] = rec['original'].get('parent')
+
+    # Backward compatibility for older clients that read teacher fields from the
+    # record root instead of the nested `teacher` object.
+    if rec.get('teacher'):
+        for key in (
+            'note', 'mood', 'health', 'appetite', 'nap', 'bowel',
+            'updatedAt', 'updatedBy', 'blocks', 'hideJournal'
+        ):
+            if rec['teacher'].get(key) is not None:
+                rec[key] = rec['teacher'].get(key)
 
     return rec
 
@@ -476,7 +492,7 @@ def update_parent_entry(student_id, date):
 
 @contact_book_bp.route('/<student_id>/<date>/teacher', methods=['PUT'])
 def update_teacher_entry(student_id, date):
-    data = request.json
+    data = dict(request.get_json() or {})
     year, month, day = map(int, date.split('-'))
     
     # Extract fields that have their own DB columns (not stored inside teacher JSON)
@@ -511,9 +527,15 @@ def update_teacher_entry(student_id, date):
     raw_attached = data.pop('attachedItems', None)
     attached_items = json.dumps(raw_attached, ensure_ascii=False) if raw_attached else None
     
+    data = normalize_teacher_payload(data)
     conn = data_service.get_db()
     try:
-        row = conn.execute('SELECT id FROM contact_books WHERE student_id = ? AND date = ?', (student_id, date)).fetchone()
+        row = conn.execute(
+            '''SELECT id, status, notified_at, read_at, signed_at, original_teacher,
+                      items_to_bring, returned_items, attached_items, survey_id
+               FROM contact_books WHERE student_id = ? AND date = ?''',
+            (student_id, date)
+        ).fetchone()
         if not row:
             conn.execute('''
                 INSERT INTO contact_books (student_id, date, year, month, status, original_teacher,
@@ -522,16 +544,30 @@ def update_teacher_entry(student_id, date):
             ''', (student_id, date, year, month, json.dumps(data, ensure_ascii=False),
                   items_to_bring, returned_items, attached_items, survey_id, edited_by, datetime.now().isoformat()))
         else:
+            data, preserved_existing_content = merge_existing_visible_content_if_empty(
+                data,
+                load_json(row['original_teacher']) or {},
+                items_to_bring=raw_items,
+                returned_items=raw_returned,
+                attached_items=raw_attached,
+                survey_id=survey_id,
+            )
+            if preserved_existing_content:
+                if items_to_bring is None:
+                    items_to_bring = row['items_to_bring']
+                if returned_items is None:
+                    returned_items = row['returned_items']
+                if attached_items is None:
+                    attached_items = row['attached_items']
+                if survey_id is None:
+                    survey_id = row['survey_id']
+
             # Don't downgrade status if already notified/read/signed
-            current = conn.execute(
-                'SELECT status, notified_at, read_at, signed_at FROM contact_books WHERE student_id = ? AND date = ?',
-                (student_id, date)
-            ).fetchone()
             current_status = _canonical_contact_book_status(
-                current['status'] if current else None,
-                current['notified_at'] if current else None,
-                current['read_at'] if current else None,
-                current['signed_at'] if current else None,
+                row['status'],
+                row['notified_at'],
+                row['read_at'],
+                row['signed_at'],
             )
             new_status = current_status if current_status in (STATUS_NOTIFIED, STATUS_READ, STATUS_SIGNED) else STATUS_DRAFT
             conn.execute('''UPDATE contact_books SET original_teacher = ?, items_to_bring = ?,
@@ -1066,7 +1102,8 @@ def batch_save_teacher(class_name, date):
     try:
         saved_count = 0
         conflicts = {}
-        for student_id, note_data in students_data.items():
+        for student_id, raw_note_data in students_data.items():
+            note_data = normalize_teacher_payload(dict(raw_note_data or {}))
             # Optimistic lock: check per-student lastModified
             known = last_known_modified.get(student_id)
             if known:
@@ -1098,7 +1135,9 @@ def batch_save_teacher(class_name, date):
             teacher_json = json.dumps(note_data, ensure_ascii=False)
 
             row = conn.execute(
-                'SELECT id, status, notified_at, read_at, signed_at FROM contact_books WHERE student_id = ? AND date = ?',
+                '''SELECT id, status, notified_at, read_at, signed_at, original_teacher,
+                          items_to_bring, returned_items, survey_id
+                   FROM contact_books WHERE student_id = ? AND date = ?''',
                 (student_id, date)
             ).fetchone()
 
@@ -1110,6 +1149,22 @@ def batch_save_teacher(class_name, date):
                 ''', (student_id, date, year, month, teacher_json,
                       items_to_bring, returned_items, survey_id, edited_by, datetime.now().isoformat()))
             else:
+                note_data, preserved_existing_content = merge_existing_visible_content_if_empty(
+                    note_data,
+                    load_json(row['original_teacher']) or {},
+                    items_to_bring=raw_items,
+                    returned_items=raw_returned,
+                    survey_id=survey_id,
+                )
+                if preserved_existing_content:
+                    if items_to_bring is None:
+                        items_to_bring = row['items_to_bring']
+                    if returned_items is None:
+                        returned_items = row['returned_items']
+                    if survey_id is None:
+                        survey_id = row['survey_id']
+                teacher_json = json.dumps(note_data, ensure_ascii=False)
+
                 # Don't downgrade status if already notified/read/signed
                 current_status = _canonical_contact_book_status(
                     row['status'],

@@ -20,6 +20,10 @@ import uuid
 from datetime import datetime
 
 from services.data_service import DataService
+from services.contact_book_teacher_payload import (
+    merge_existing_visible_content_if_empty,
+    normalize_teacher_payload,
+)
 from services.push_outbox_service import EVENT_ROLE_PUSH, enqueue_push_job, ensure_push_outbox_table
 
 
@@ -519,7 +523,7 @@ def _persist_document(document_id):
 
 
 def _save_note_snapshot(parsed, snapshot):
-    note_data = dict(snapshot.get('note') or {})
+    note_data = normalize_teacher_payload(dict(snapshot.get('note') or {}))
     edited_by_raw = snapshot.get('editedBy') or {}
     year, month, _day = map(int, parsed['date'].split('-'))
     now = datetime.now().isoformat()
@@ -547,7 +551,9 @@ def _save_note_snapshot(parsed, snapshot):
     conn = data_service.get_db()
     try:
         row = conn.execute(
-            'SELECT id, status, notified_at, read_at, signed_at FROM contact_books WHERE student_id = ? AND date = ?',
+            '''SELECT id, status, notified_at, read_at, signed_at, original_teacher,
+                      items_to_bring, returned_items, survey_id
+               FROM contact_books WHERE student_id = ? AND date = ?''',
             (parsed['studentId'], parsed['date'])
         ).fetchone()
         teacher_json = json.dumps(note_data, ensure_ascii=False)
@@ -559,6 +565,22 @@ def _save_note_snapshot(parsed, snapshot):
             ''', (parsed['studentId'], parsed['date'], year, month, teacher_json,
                   items_to_bring, returned_items, survey_id, edited_by, now))
         else:
+            note_data, preserved_existing_content = merge_existing_visible_content_if_empty(
+                note_data,
+                _load_json(row['original_teacher'], {}) or {},
+                items_to_bring=raw_items,
+                returned_items=raw_returned,
+                survey_id=survey_id,
+            )
+            if preserved_existing_content:
+                if items_to_bring is None:
+                    items_to_bring = row['items_to_bring']
+                if returned_items is None:
+                    returned_items = row['returned_items']
+                if survey_id is None:
+                    survey_id = row['survey_id']
+            teacher_json = json.dumps(note_data, ensure_ascii=False)
+
             current_status = _canonical_contact_book_status(row)
             new_status = current_status if current_status in ('notified', 'read', 'signed') else 'draft'
             conn.execute('''

@@ -38,6 +38,7 @@ REQUIRE_DELIVERY_SUCCESS_EVENT_TYPES = {
 
 _WORKER_STARTED = False
 _WORKER_LOCK = threading.Lock()
+_WORKER_WAKE_EVENT = threading.Event()
 
 
 def ensure_push_outbox_table(conn):
@@ -113,6 +114,7 @@ def enqueue_push_job(
             now,
         ),
     )
+    _WORKER_WAKE_EVENT.set()
 
 
 def enqueue_contact_book_parent_update(
@@ -586,10 +588,11 @@ def start_push_outbox_worker(data_service, interval_seconds=10):
     def _run():
         print('[PushOutbox] worker started')
         while True:
+            _WORKER_WAKE_EVENT.clear()
             try:
                 process_push_outbox(data_service)
             except Exception as e:
                 print(f'[PushOutbox] loop error: {e}')
-            time.sleep(interval_seconds)
+            _WORKER_WAKE_EVENT.wait(interval_seconds)
 
     threading.Thread(target=_run, daemon=True).start()
