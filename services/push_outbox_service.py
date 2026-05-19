@@ -39,37 +39,48 @@ REQUIRE_DELIVERY_SUCCESS_EVENT_TYPES = {
 _WORKER_STARTED = False
 _WORKER_LOCK = threading.Lock()
 _WORKER_WAKE_EVENT = threading.Event()
+_OUTBOX_SCHEMA_LOCK = threading.Lock()
+_OUTBOX_SCHEMA_READY = False
 
 
 def ensure_push_outbox_table(conn):
-    conn.executescript('''
-        CREATE TABLE IF NOT EXISTS push_outbox (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_type VARCHAR(80) NOT NULL,
-            recipient_scope VARCHAR(80) NOT NULL,
-            recipient_id VARCHAR(100),
-            title TEXT,
-            body TEXT,
-            payload TEXT NOT NULL,
-            pref_column VARCHAR(80),
-            idempotency_key VARCHAR(200) NOT NULL UNIQUE,
-            source_table VARCHAR(80),
-            source_id INTEGER,
-            status VARCHAR(20) NOT NULL DEFAULT 'pending',
-            attempts INTEGER NOT NULL DEFAULT 0,
-            max_attempts INTEGER NOT NULL DEFAULT 5,
-            next_attempt_at VARCHAR(50) NOT NULL,
-            sent_count INTEGER NOT NULL DEFAULT 0,
-            last_error TEXT,
-            created_at VARCHAR(50) NOT NULL,
-            updated_at VARCHAR(50),
-            sent_at VARCHAR(50)
-        );
-        CREATE INDEX IF NOT EXISTS idx_push_outbox_due
-            ON push_outbox(status, next_attempt_at);
-        CREATE INDEX IF NOT EXISTS idx_push_outbox_source
-            ON push_outbox(source_table, source_id);
-    ''')
+    global _OUTBOX_SCHEMA_READY
+    if _OUTBOX_SCHEMA_READY:
+        return
+    with _OUTBOX_SCHEMA_LOCK:
+        if _OUTBOX_SCHEMA_READY:
+            return
+        conn.executescript('''
+            CREATE TABLE IF NOT EXISTS push_outbox (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type VARCHAR(80) NOT NULL,
+                recipient_scope VARCHAR(80) NOT NULL,
+                recipient_id VARCHAR(100),
+                title TEXT,
+                body TEXT,
+                payload TEXT NOT NULL,
+                pref_column VARCHAR(80),
+                idempotency_key VARCHAR(200) NOT NULL UNIQUE,
+                source_table VARCHAR(80),
+                source_id INTEGER,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                max_attempts INTEGER NOT NULL DEFAULT 5,
+                next_attempt_at VARCHAR(50) NOT NULL,
+                sent_count INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                created_at VARCHAR(50) NOT NULL,
+                updated_at VARCHAR(50),
+                sent_at VARCHAR(50)
+            );
+            CREATE INDEX IF NOT EXISTS idx_push_outbox_due
+                ON push_outbox(status, next_attempt_at);
+            CREATE INDEX IF NOT EXISTS idx_push_outbox_source
+                ON push_outbox(source_table, source_id);
+            CREATE INDEX IF NOT EXISTS idx_push_outbox_status_updated
+                ON push_outbox(status, updated_at);
+        ''')
+        _OUTBOX_SCHEMA_READY = True
 
 
 def enqueue_push_job(
@@ -306,11 +317,10 @@ def _claim_next_job(data_service):
     conn = data_service.get_db()
     try:
         ensure_push_outbox_table(conn)
-        conn.execute('BEGIN IMMEDIATE')
         now = datetime.now().isoformat()
-        row = conn.execute(
+        candidate = conn.execute(
             '''
-            SELECT *
+            SELECT id
             FROM push_outbox
             WHERE status = ?
               AND next_attempt_at <= ?
@@ -319,6 +329,21 @@ def _claim_next_job(data_service):
             LIMIT 1
             ''',
             (OUTBOX_PENDING, now),
+        ).fetchone()
+        if not candidate:
+            return None
+
+        conn.execute('BEGIN IMMEDIATE')
+        row = conn.execute(
+            '''
+            SELECT *
+            FROM push_outbox
+            WHERE id = ?
+              AND status = ?
+              AND next_attempt_at <= ?
+              AND attempts < max_attempts
+            ''',
+            (candidate['id'], OUTBOX_PENDING, now),
         ).fetchone()
         if not row:
             conn.commit()
@@ -531,6 +556,18 @@ def _reset_stale_sending_jobs(data_service, stale_after_seconds=600):
     conn = data_service.get_db()
     try:
         ensure_push_outbox_table(conn)
+        stale = conn.execute(
+            '''
+            SELECT 1
+            FROM push_outbox
+            WHERE status = ? AND updated_at <= ?
+            LIMIT 1
+            ''',
+            (OUTBOX_SENDING, cutoff),
+        ).fetchone()
+        if not stale:
+            return
+
         conn.execute(
             '''
             UPDATE push_outbox
@@ -588,11 +625,11 @@ def start_push_outbox_worker(data_service, interval_seconds=10):
     def _run():
         print('[PushOutbox] worker started')
         while True:
+            _WORKER_WAKE_EVENT.wait(interval_seconds)
             _WORKER_WAKE_EVENT.clear()
             try:
                 process_push_outbox(data_service)
             except Exception as e:
                 print(f'[PushOutbox] loop error: {e}')
-            _WORKER_WAKE_EVENT.wait(interval_seconds)
 
     threading.Thread(target=_run, daemon=True).start()

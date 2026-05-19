@@ -13,6 +13,7 @@ visible, then loads class_journals + contact_books for the content.
 """
 import json
 import os
+import sqlite3
 import threading
 import time
 from datetime import datetime
@@ -67,6 +68,44 @@ def _load_student_ids(raw):
 
 def _dump_student_ids(student_ids):
     return json.dumps([str(s) for s in (student_ids or [])], ensure_ascii=False)
+
+
+def ensure_grant_student_index_table(conn):
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS class_notification_grant_students (
+            class_name VARCHAR(100) NOT NULL,
+            date VARCHAR(20) NOT NULL,
+            student_id VARCHAR(50) NOT NULL,
+            created_at VARCHAR(50),
+            PRIMARY KEY (class_name, date, student_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_cngs_student_date
+            ON class_notification_grant_students(student_id, date);
+        CREATE INDEX IF NOT EXISTS idx_cngs_student_class_date
+            ON class_notification_grant_students(student_id, class_name, date);
+    ''')
+
+
+def _replace_grant_student_index(conn, class_name, date_key, student_ids):
+    ensure_grant_student_index_table(conn)
+    conn.execute(
+        'DELETE FROM class_notification_grant_students WHERE class_name = ? AND date = ?',
+        (class_name, date_key),
+    )
+    values = [
+        (class_name, date_key, str(sid).strip(), _now())
+        for sid in student_ids
+        if str(sid).strip()
+    ]
+    if values:
+        conn.executemany(
+            '''
+            INSERT OR IGNORE INTO class_notification_grant_students
+                (class_name, date, student_id, created_at)
+            VALUES (?, ?, ?, ?)
+            ''',
+            values,
+        )
 
 
 def dismissal_send_at_for_date(date_key):
@@ -159,21 +198,43 @@ def is_visible_to_student(grant_row, student_id):
 def get_visible_grants_for_student(conn, student_id, class_name=None, date_like=None):
     """Return all active grants where the given student is in student_ids.
     Optional filters: class_name (exact), date_like (e.g. '2026-05-%')."""
-    clauses = ['cancelled_at IS NULL']
-    params = []
+    clauses = ['g.cancelled_at IS NULL', 'gs.student_id = ?']
+    params = [str(student_id)]
     if class_name:
-        clauses.append('class_name = ?')
+        clauses.append('g.class_name = ?')
         params.append(class_name)
     if date_like:
-        clauses.append('date LIKE ?')
+        clauses.append('g.date LIKE ?')
         params.append(date_like)
     where = ' AND '.join(clauses)
-    rows = conn.execute(
-        f'SELECT * FROM class_notification_grants WHERE {where} ORDER BY date',
-        params,
-    ).fetchall()
-    sid = str(student_id)
-    return [r for r in rows if sid in _load_student_ids(r['student_ids'])]
+    try:
+        return conn.execute(
+            f'''
+            SELECT g.*
+            FROM class_notification_grants g
+            JOIN class_notification_grant_students gs
+              ON gs.class_name = g.class_name
+             AND gs.date = g.date
+            WHERE {where}
+            ORDER BY g.date
+            ''',
+            params,
+        ).fetchall()
+    except sqlite3.OperationalError:
+        fallback_clauses = ['cancelled_at IS NULL']
+        fallback_params = []
+        if class_name:
+            fallback_clauses.append('class_name = ?')
+            fallback_params.append(class_name)
+        if date_like:
+            fallback_clauses.append('date LIKE ?')
+            fallback_params.append(date_like)
+        rows = conn.execute(
+            f'SELECT * FROM class_notification_grants WHERE {" AND ".join(fallback_clauses)} ORDER BY date',
+            fallback_params,
+        ).fetchall()
+        sid = str(student_id)
+        return [r for r in rows if sid in _load_student_ids(r['student_ids'])]
 
 
 def get_visible_dates_for_student(conn, student_id, class_name=None, date_like=None):
@@ -306,6 +367,7 @@ def grant_now(data_service, class_name, date_key, student_ids, sent_by='', stude
     conn = data_service.get_db()
     try:
         ensure_push_outbox_table(conn)
+        ensure_grant_student_index_table(conn)
         conn.execute('BEGIN IMMEDIATE')
 
         existing = get_grant(conn, class_name, date_key)
@@ -324,6 +386,7 @@ def grant_now(data_service, class_name, date_key, student_ids, sent_by='', stude
                 ''',
                 (_dump_student_ids(merged_ids), class_name, date_key),
             )
+            _replace_grant_student_index(conn, class_name, date_key, merged_ids)
             event_id = _insert_event(
                 conn, class_name, date_key, new_ids,
                 mode, EVENT_GRANTED, sent_by,
@@ -356,6 +419,7 @@ def grant_now(data_service, class_name, date_key, student_ids, sent_by='', stude
                     ''',
                     (class_name, date_key, now, sent_by, _dump_student_ids(student_ids)),
                 )
+            _replace_grant_student_index(conn, class_name, date_key, student_ids)
             event_id = _insert_event(
                 conn, class_name, date_key, student_ids,
                 mode, EVENT_GRANTED, sent_by,
@@ -389,6 +453,7 @@ def cancel_grant(data_service, class_name, date_key, cancelled_by=''):
     """Soft-delete a grant. Parents stop seeing this (class, date)."""
     conn = data_service.get_db()
     try:
+        ensure_grant_student_index_table(conn)
         conn.execute('BEGIN IMMEDIATE')
         now = _now()
         existing = get_grant(conn, class_name, date_key)
@@ -406,6 +471,10 @@ def cancel_grant(data_service, class_name, date_key, cancelled_by=''):
             WHERE class_name = ? AND date = ?
             ''',
             (now, cancelled_by, class_name, date_key),
+        )
+        conn.execute(
+            'DELETE FROM class_notification_grant_students WHERE class_name = ? AND date = ?',
+            (class_name, date_key),
         )
         student_ids = _load_student_ids(existing['student_ids'])
         _insert_event(
@@ -591,10 +660,10 @@ def start_scheduled_notification_worker(data_service, interval_seconds=30):
     def _run():
         print('[GrantWorker] scheduled class notification worker started')
         while True:
+            time.sleep(interval_seconds)
             try:
                 process_due_scheduled_notifications(data_service)
             except Exception as e:
                 print(f'[GrantWorker] loop error: {e}')
-            time.sleep(interval_seconds)
 
     threading.Thread(target=_run, daemon=True).start()

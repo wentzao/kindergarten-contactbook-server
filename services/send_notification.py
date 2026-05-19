@@ -55,7 +55,6 @@ def lookup_student_name(student_id):
     try:
         conn = sqlite3.connect(_DB_PATH, timeout=_DB_TIMEOUT)
         conn.row_factory = sqlite3.Row
-        conn.execute(f'PRAGMA busy_timeout={int(_DB_TIMEOUT * 1000)}')
         row = conn.execute(
             'SELECT chinese_name, english_name FROM student_names WHERE student_id = ?',
             (student_id,)
@@ -651,21 +650,13 @@ def send_to_student_parents(data_service, student_id, title, body, data=None, pr
     normalized_student_id = str(student_id)
     conn = data_service.get_db()
     try:
-        rows = conn.execute(
-            '''
-            SELECT DISTINCT push_token, user_id, student_ids, provider, platform, environment, bundle_id
-            FROM push_tokens
-            WHERE role = 'parent'
-            ''',
-        ).fetchall()
-
         bound_user_ids = set()
         try:
             binding_rows = conn.execute(
                 '''
                 SELECT DISTINCT user_id
                 FROM student_bindings
-                WHERE CAST(student_id AS TEXT) = ?
+                WHERE student_id = ?
                 ''',
                 (normalized_student_id,),
             ).fetchall()
@@ -686,17 +677,50 @@ def send_to_student_parents(data_service, student_id, title, body, data=None, pr
                 opted_out = set()
 
         target_rows = []
-        for r in rows:
+        seen = set()
+
+        if bound_user_ids:
+            placeholders = ','.join('?' for _ in bound_user_ids)
+            bound_rows = conn.execute(
+                f'''
+                SELECT DISTINCT push_token, user_id, student_ids, provider, platform, environment, bundle_id
+                FROM push_tokens
+                WHERE role = 'parent' AND user_id IN ({placeholders})
+                ''',
+                tuple(bound_user_ids),
+            ).fetchall()
+            for r in bound_rows:
+                user_id = str(r['user_id'] or '')
+                if pref_column and user_id in opted_out:
+                    continue
+                key = (user_id, str(r['push_token'] or ''))
+                if key not in seen:
+                    seen.add(key)
+                    target_rows.append(dict(r))
+
+        legacy_rows = conn.execute(
+            '''
+            SELECT DISTINCT push_token, user_id, student_ids, provider, platform, environment, bundle_id
+            FROM push_tokens
+            WHERE role = 'parent'
+              AND student_ids IS NOT NULL
+              AND student_ids != ''
+            ''',
+        ).fetchall()
+        for r in legacy_rows:
             try:
                 sids = json.loads(r['student_ids']) if r['student_ids'] else []
                 if not isinstance(sids, list):
                     sids = []
                 normalized_sids = {str(sid) for sid in sids}
                 user_id = str(r['user_id'] or '')
-                if normalized_student_id in normalized_sids or user_id in bound_user_ids:
+                if normalized_student_id in normalized_sids:
                     if pref_column and user_id in opted_out:
                         continue
-                    target_rows.append(dict(r))
+                    key = (user_id, str(r['push_token'] or ''))
+                    if key not in seen:
+                        seen.add(key)
+                        target_rows.append(dict(r))
             except (json.JSONDecodeError, TypeError):
                 continue
         if not target_rows:

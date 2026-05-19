@@ -15,10 +15,7 @@ _DB_PATH = (
 _DB_TIMEOUT = float(os.environ.get('SQLITE_BUSY_TIMEOUT_SECONDS', '5'))
 
 def _connect_db():
-    conn = sqlite3.connect(_DB_PATH, timeout=_DB_TIMEOUT)
-    conn.execute(f'PRAGMA busy_timeout={int(_DB_TIMEOUT * 1000)}')
-    conn.execute('PRAGMA synchronous=NORMAL')
-    return conn
+    return sqlite3.connect(_DB_PATH, timeout=_DB_TIMEOUT)
 
 def _cache_student_names(students):
     """Cache student names in the database for notification lookups."""

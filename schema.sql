@@ -41,6 +41,7 @@ CREATE TABLE student_bindings (
     created_at VARCHAR(50),
     PRIMARY KEY (user_id, student_id)
 );
+CREATE INDEX idx_student_bindings_student_user ON student_bindings(student_id, user_id);
 
 DROP TABLE IF EXISTS teacher_class_memberships;
 CREATE TABLE teacher_class_memberships (
@@ -85,6 +86,17 @@ CREATE TABLE class_notification_grants (
 );
 CREATE INDEX idx_cng_date ON class_notification_grants(date);
 
+DROP TABLE IF EXISTS class_notification_grant_students;
+CREATE TABLE class_notification_grant_students (
+    class_name VARCHAR(100) NOT NULL,
+    date VARCHAR(20) NOT NULL,
+    student_id VARCHAR(50) NOT NULL,
+    created_at VARCHAR(50),
+    PRIMARY KEY (class_name, date, student_id)
+);
+CREATE INDEX idx_cngs_student_date ON class_notification_grant_students(student_id, date);
+CREATE INDEX idx_cngs_student_class_date ON class_notification_grant_students(student_id, class_name, date);
+
 -- 班級日誌 — 純內容，不再有 notified_at（通知狀態由 grants 管）。
 DROP TABLE IF EXISTS class_journals;
 CREATE TABLE class_journals (
@@ -126,6 +138,7 @@ CREATE TABLE contact_books (
     UNIQUE(student_id, date)
 );
 CREATE INDEX idx_cb_student_ym ON contact_books(student_id, year, month);
+CREATE INDEX idx_cb_student_date_desc ON contact_books(student_id, date DESC);
 
 -- 排程通知（class 層級）
 DROP TABLE IF EXISTS scheduled_class_notifications;
@@ -181,6 +194,7 @@ CREATE TABLE leave_records (
     created_at VARCHAR(50)
 );
 CREATE INDEX idx_leave_child ON leave_records(child_id);
+CREATE INDEX idx_leave_dates ON leave_records(start_date, end_date);
 
 DROP TABLE IF EXISTS med_records;
 CREATE TABLE med_records (
@@ -195,6 +209,7 @@ CREATE TABLE med_records (
     medication_details TEXT
 );
 CREATE INDEX idx_med_child ON med_records(child_id);
+CREATE INDEX idx_med_dates ON med_records(start_date, end_date);
 
 DROP TABLE IF EXISTS news;
 CREATE TABLE news (
@@ -255,6 +270,7 @@ CREATE TABLE push_tokens (
     updated_at VARCHAR(50),
     UNIQUE(user_id, push_token)
 );
+CREATE INDEX idx_push_tokens_role_user ON push_tokens(role, user_id);
 
 DROP TABLE IF EXISTS notification_preferences;
 CREATE TABLE notification_preferences (
@@ -289,6 +305,7 @@ CREATE TABLE push_outbox (
 );
 CREATE INDEX idx_push_outbox_due ON push_outbox(status, next_attempt_at);
 CREATE INDEX idx_push_outbox_source ON push_outbox(source_table, source_id);
+CREATE INDEX idx_push_outbox_status_updated ON push_outbox(status, updated_at);
 
 -- ─────────────────────────────────────────────
 -- 教師端：通知信箱 / 留言已讀

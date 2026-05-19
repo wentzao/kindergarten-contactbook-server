@@ -1,9 +1,12 @@
 import os
 import json
 import sqlite3
+import threading
 from datetime import datetime
 
 DEFAULT_DB_TIMEOUT = float(os.environ.get('SQLITE_BUSY_TIMEOUT_SECONDS', '5'))
+_SCHEMA_LOCK = threading.Lock()
+_SCHEMA_READY_PATHS = set()
 
 class DataService:
     # Type label translations (English to Chinese)
@@ -29,14 +32,19 @@ class DataService:
             or os.environ.get('DB_PATH')
             or default_db_path
         )
-        self._ensure_schema()
+        self._ensure_schema_once()
 
     def get_db(self):
         conn = sqlite3.connect(self.db_path, timeout=DEFAULT_DB_TIMEOUT)
         conn.row_factory = sqlite3.Row
-        conn.execute(f'PRAGMA busy_timeout={int(DEFAULT_DB_TIMEOUT * 1000)}')
-        conn.execute('PRAGMA synchronous=NORMAL')
         return conn
+
+    def _ensure_schema_once(self):
+        with _SCHEMA_LOCK:
+            if self.db_path in _SCHEMA_READY_PATHS:
+                return
+            self._ensure_schema()
+            _SCHEMA_READY_PATHS.add(self.db_path)
 
     def _ensure_schema(self):
         """Defensive schema migration — runs every startup, idempotent.
@@ -47,8 +55,6 @@ class DataService:
         """
         conn = sqlite3.connect(self.db_path, timeout=DEFAULT_DB_TIMEOUT)
         try:
-            conn.execute('PRAGMA journal_mode=WAL')
-            conn.execute('PRAGMA synchronous=NORMAL')
             # signature_url for leave_records (added when 家長簽名 feature shipped)
             try:
                 conn.execute('ALTER TABLE leave_records ADD COLUMN signature_url TEXT')
@@ -65,8 +71,67 @@ class DataService:
                 print('[DATA_SERVICE] Added parent_signature_url column to contact_books')
             except sqlite3.OperationalError:
                 pass
+
+            conn.executescript('''
+                CREATE TABLE IF NOT EXISTS class_notification_grant_students (
+                    class_name VARCHAR(100) NOT NULL,
+                    date VARCHAR(20) NOT NULL,
+                    student_id VARCHAR(50) NOT NULL,
+                    created_at VARCHAR(50),
+                    PRIMARY KEY (class_name, date, student_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_cngs_student_date
+                    ON class_notification_grant_students(student_id, date);
+                CREATE INDEX IF NOT EXISTS idx_cngs_student_class_date
+                    ON class_notification_grant_students(student_id, class_name, date);
+                CREATE INDEX IF NOT EXISTS idx_push_tokens_role_user
+                    ON push_tokens(role, user_id);
+                CREATE INDEX IF NOT EXISTS idx_student_bindings_student_user
+                    ON student_bindings(student_id, user_id);
+                CREATE INDEX IF NOT EXISTS idx_cb_student_date_desc
+                    ON contact_books(student_id, date DESC);
+                CREATE INDEX IF NOT EXISTS idx_leave_dates
+                    ON leave_records(start_date, end_date);
+                CREATE INDEX IF NOT EXISTS idx_med_dates
+                    ON med_records(start_date, end_date);
+                CREATE INDEX IF NOT EXISTS idx_push_outbox_status_updated
+                    ON push_outbox(status, updated_at);
+            ''')
+            self._rebuild_grant_student_index(conn)
+            conn.commit()
         finally:
             conn.close()
+
+    def _rebuild_grant_student_index(self, conn):
+        try:
+            rows = conn.execute(
+                'SELECT class_name, date, student_ids, notified_at FROM class_notification_grants'
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return
+
+        conn.execute('DELETE FROM class_notification_grant_students')
+        values = []
+        for row in rows:
+            try:
+                student_ids = json.loads(row['student_ids'] or '[]')
+            except (json.JSONDecodeError, TypeError):
+                student_ids = []
+            if not isinstance(student_ids, list):
+                continue
+            for sid in student_ids:
+                sid = str(sid).strip()
+                if sid:
+                    values.append((row['class_name'], row['date'], sid, row['notified_at']))
+        if values:
+            conn.executemany(
+                '''
+                INSERT OR IGNORE INTO class_notification_grant_students
+                    (class_name, date, student_id, created_at)
+                VALUES (?, ?, ?, ?)
+                ''',
+                values,
+            )
 
     def _translate_type(self, data_type, type_value):
         """Translate type value from English to Chinese"""

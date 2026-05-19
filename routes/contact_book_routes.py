@@ -48,8 +48,9 @@ DERIVED_SIGNED = 'signed'       # parent has signed
 # ──────────────────────────────────────────────────────────
 # Background worker startup
 # ──────────────────────────────────────────────────────────
-grant_service.start_scheduled_notification_worker(data_service)
-start_push_outbox_worker(data_service)
+def start_contact_book_background_workers():
+    grant_service.start_scheduled_notification_worker(data_service)
+    start_push_outbox_worker(data_service)
 
 
 # ──────────────────────────────────────────────────────────

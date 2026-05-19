@@ -26,7 +26,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 from routes.leave_routes import leave_bp
 from routes.med_routes import med_bp
 from routes.survey_routes import survey_bp
-from routes.contact_book_routes import contact_book_bp
+from routes.contact_book_routes import contact_book_bp, start_contact_book_background_workers
 from routes.news_routes import news_bp
 from routes.auth_routes import auth_bp
 from routes.student_routes import student_bp
@@ -77,6 +77,7 @@ def _run_startup_migrations():
         print(f'[startup] Migration warning: {e}')
 
 _run_startup_migrations()
+start_contact_book_background_workers()
 
 # Request logging middleware
 @app.before_request
