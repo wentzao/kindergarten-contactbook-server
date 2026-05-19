@@ -46,14 +46,16 @@ _DB_PATH = (
     or os.environ.get('DB_PATH')
     or os.path.join(os.path.dirname(os.path.dirname(__file__)), 'kindergarten.db')
 )
+_DB_TIMEOUT = float(os.environ.get('SQLITE_BUSY_TIMEOUT_SECONDS', '5'))
 
 
 def lookup_student_name(student_id):
     """Look up cached student name (Chinese + English) by student_id.
     Returns the student_id itself if no name is found."""
     try:
-        conn = sqlite3.connect(_DB_PATH)
+        conn = sqlite3.connect(_DB_PATH, timeout=_DB_TIMEOUT)
         conn.row_factory = sqlite3.Row
+        conn.execute(f'PRAGMA busy_timeout={int(_DB_TIMEOUT * 1000)}')
         row = conn.execute(
             'SELECT chinese_name, english_name FROM student_names WHERE student_id = ?',
             (student_id,)
@@ -137,6 +139,10 @@ def _row_value(row, key, default=None):
     except Exception:
         return default
     return default if value is None else value
+
+
+def _rows_as_dicts(rows):
+    return [dict(row) for row in rows]
 
 
 def _row_provider(row):
@@ -528,9 +534,10 @@ def send_to_role(data_service, role, title, body, data=None):
             ''',
             (role,)
         ).fetchall()
-        return send_to_push_rows(rows, title, body, data)
+        target_rows = _rows_as_dicts(rows)
     finally:
         conn.close()
+    return send_to_push_rows(target_rows, title, body, data)
 
 
 def send_to_teacher_user_ids(data_service, user_ids, title, body, data=None):
@@ -562,7 +569,7 @@ def send_to_teacher_user_ids(data_service, user_ids, title, body, data=None):
 
         rows_by_user_id = {}
         for row in rows:
-            rows_by_user_id.setdefault(row['user_id'], []).append(row)
+            rows_by_user_id.setdefault(row['user_id'], []).append(dict(row))
 
         notification_results = {}
         if title:
@@ -574,18 +581,18 @@ def send_to_teacher_user_ids(data_service, user_ids, title, body, data=None):
             }
         else:
             badge_counts = get_unread_counts(conn, enabled_user_ids)
-
-        count = 0
-        for user_id, user_rows in rows_by_user_id.items():
-            data_with_badge = dict(data or {})
-            data_with_badge['badge'] = str(badge_counts.get(user_id, 0))
-            notification_id = notification_results.get(user_id, {}).get('notificationId')
-            if notification_id:
-                data_with_badge['notificationId'] = str(notification_id)
-            count += send_to_push_rows(user_rows, title, body, data_with_badge)
-        return count
     finally:
         conn.close()
+
+    count = 0
+    for user_id, user_rows in rows_by_user_id.items():
+        data_with_badge = dict(data or {})
+        data_with_badge['badge'] = str(badge_counts.get(user_id, 0))
+        notification_id = notification_results.get(user_id, {}).get('notificationId')
+        if notification_id:
+            data_with_badge['notificationId'] = str(notification_id)
+        count += send_to_push_rows(user_rows, title, body, data_with_badge)
+    return count
 
 
 def resolve_teacher_user_ids_for_student(data_service, student_id, semester=None, class_name=None):
@@ -689,14 +696,14 @@ def send_to_student_parents(data_service, student_id, title, body, data=None, pr
                 if normalized_student_id in normalized_sids or user_id in bound_user_ids:
                     if pref_column and user_id in opted_out:
                         continue
-                    target_rows.append(r)
+                    target_rows.append(dict(r))
             except (json.JSONDecodeError, TypeError):
                 continue
         if not target_rows:
             print(f'[PushScope] No parent push tokens matched student {normalized_student_id}')
-        return send_to_push_rows(target_rows, title, body, data)
     finally:
         conn.close()
+    return send_to_push_rows(target_rows, title, body, data)
 
 
 def notify_teachers_new_comment(data_service, student_id, student_name, sender_name, content, date='', class_name=None):
@@ -809,13 +816,13 @@ def notify_parents_announcement(data_service, news_id, title_text, body_text='')
         ).fetchall()
         opted_out = {r['user_id'] for r in pref_rows}
 
-        target_rows = [r for r in rows if r['user_id'] not in opted_out]
-        count = send_to_push_rows(target_rows, title, body, ndata)
-        if count > 0:
-            print(f'[Push] Sent announcement notification to {count} parent devices')
-        return count
+        target_rows = [dict(r) for r in rows if r['user_id'] not in opted_out]
     finally:
         conn.close()
+    count = send_to_push_rows(target_rows, title, body, ndata)
+    if count > 0:
+        print(f'[Push] Sent announcement notification to {count} parent devices')
+    return count
 
 
 def notify_parents_announcement_update(data_service, news_id):
@@ -844,13 +851,13 @@ def notify_parents_announcement_update(data_service, news_id):
         ).fetchall()
         opted_out = {r['user_id'] for r in pref_rows}
 
-        target_rows = [r for r in rows if r['user_id'] not in opted_out]
-        count = send_to_push_rows(target_rows, '', '', ndata)
-        if count > 0:
-            print(f'[Push] Sent silent update notification to {count} parent devices')
-        return count
+        target_rows = [dict(r) for r in rows if r['user_id'] not in opted_out]
     finally:
         conn.close()
+    count = send_to_push_rows(target_rows, '', '', ndata)
+    if count > 0:
+        print(f'[Push] Sent silent update notification to {count} parent devices')
+    return count
 
 
 def notify_teachers_status_update(data_service, student_id, student_name, date, new_status):

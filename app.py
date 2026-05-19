@@ -65,7 +65,10 @@ def _run_startup_migrations():
         or os.path.join(os.path.dirname(__file__), 'kindergarten.db')
     )
     try:
-        conn = sqlite3.connect(db_path)
+        timeout = float(os.environ.get('SQLITE_BUSY_TIMEOUT_SECONDS', '5'))
+        conn = sqlite3.connect(db_path, timeout=timeout)
+        conn.execute(f'PRAGMA busy_timeout={int(timeout * 1000)}')
+        conn.execute('PRAGMA synchronous=NORMAL')
         conn.execute('DROP TABLE IF EXISTS parent_student_relations')
         conn.commit()
         conn.close()
@@ -78,6 +81,8 @@ _run_startup_migrations()
 # Request logging middleware
 @app.before_request
 def log_request_info():
+    if os.environ.get('REQUEST_LOGGING', '').lower() not in ('1', 'true', 'yes'):
+        return
     print('=' * 80)
     print(f"[REQUEST] {request.method} {request.path}")
     print(f"[REQUEST] Remote Address: {request.remote_addr}")

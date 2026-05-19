@@ -132,10 +132,12 @@ def _derived_status(read_at, signed_at, has_grant):
     return 'draft'
 
 
-def _row_to_record(row, profiles=None, has_grant=False, class_journal=None,
-                   scheduled_notification=None):
+def _row_to_record(row, profiles=None, has_grant=False, grant_notified_at=None,
+                   class_journal=None, scheduled_notification=None):
     """Convert one contact_books row → parent/teacher facing record dict.
-    `row` may be None (= grant exists but no individual data yet)."""
+    `row` may be None (= grant exists but no individual data yet).
+    `grant_notified_at` — populate `notifiedAt` so clients (iOS teacher app
+    especially) can render "已通知" UI without a second grants lookup."""
     if row:
         date_str = row['date']
         read_at = row['read_at']
@@ -168,6 +170,7 @@ def _row_to_record(row, profiles=None, has_grant=False, class_journal=None,
         'date': date_str,
         'dayOfWeek': _day_of_week(date_str) if date_str else '',
         'status': _derived_status(read_at, signed_at, has_grant),
+        'notifiedAt': grant_notified_at if has_grant else None,
         'readAt': read_at,
         'signedAt': signed_at,
         'parentSignatureUrl': parent_signature_url,
@@ -383,7 +386,8 @@ def get_contact_book(student_id, year, month):
         ).fetchall()
         row_map = {r['date']: r for r in all_rows}
 
-        # Determine the date list
+        # Determine the date list + collect grant timestamps for each date
+        grant_notified_at_by_date = {}
         if include_unpublished:
             dates = sorted(row_map.keys())
             grant_dates = set()
@@ -392,11 +396,13 @@ def get_contact_book(student_id, year, month):
                     conn, student_id, class_name=class_name, date_like=date_like,
                 )
                 grant_dates = {g['date'] for g in grant_rows}
+                grant_notified_at_by_date = {g['date']: g['notified_at'] for g in grant_rows}
         else:
             grant_rows = grant_service.get_visible_grants_for_student(
                 conn, student_id, class_name=class_name, date_like=date_like,
             ) if class_name else []
             grant_dates = {g['date'] for g in grant_rows}
+            grant_notified_at_by_date = {g['date']: g['notified_at'] for g in grant_rows}
             # Also include dates with parent action (read/signed/comments) — keeps
             # past signed records visible even if the grant was later cancelled.
             action_dates = {
@@ -412,11 +418,10 @@ def get_contact_book(student_id, year, month):
         for date_str in dates:
             row = row_map.get(date_str)
             has_grant = date_str in grant_dates
-            # Class journal is shown only if the date is parent-visible
-            # (or it's the teacher path with includeUnpublished).
             journal = journal_map.get(date_str) if (has_grant or include_unpublished) else None
             rec = _row_to_record(
                 row, profiles=profiles, has_grant=has_grant,
+                grant_notified_at=grant_notified_at_by_date.get(date_str),
                 class_journal=journal,
                 scheduled_notification=schedule_map.get(date_str),
             )
@@ -479,6 +484,7 @@ def get_latest_records(student_id):
             grant_rows = sorted(grant_rows, key=lambda g: g['date'], reverse=True)[:limit]
             dates = [g['date'] for g in grant_rows]
             grant_dates = set(dates)
+            grant_notified_at_by_date = {g['date']: g['notified_at'] for g in grant_rows}
             row_map = {}
             if dates:
                 placeholders = ','.join('?' for _ in dates)
@@ -487,7 +493,6 @@ def get_latest_records(student_id):
                     (student_id, *dates),
                 ).fetchall()
                 row_map = {r['date']: r for r in row_query}
-            # journal map (date_like restricted by min-max date)
             journal_map = {}
             if class_name and dates:
                 jrows = conn.execute(
@@ -507,6 +512,7 @@ def get_latest_records(student_id):
                 rec = _row_to_record(
                     row_map.get(date_str), profiles=profiles,
                     has_grant=date_str in grant_dates,
+                    grant_notified_at=grant_notified_at_by_date.get(date_str),
                     class_journal=journal_map.get(date_str),
                     scheduled_notification=None,
                 )

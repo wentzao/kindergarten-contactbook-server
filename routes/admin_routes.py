@@ -68,8 +68,11 @@ STUDENT_IMAGE_FOLDERS = [
 
 
 def _get_db():
-    conn = sqlite3.connect(DB_PATH, timeout=30)
+    timeout = float(os.environ.get('SQLITE_BUSY_TIMEOUT_SECONDS', '5'))
+    conn = sqlite3.connect(DB_PATH, timeout=timeout)
     conn.row_factory = sqlite3.Row
+    conn.execute(f'PRAGMA busy_timeout={int(timeout * 1000)}')
+    conn.execute('PRAGMA synchronous=NORMAL')
     return conn
 
 

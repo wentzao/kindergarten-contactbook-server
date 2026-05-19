@@ -12,11 +12,18 @@ _DB_PATH = (
     or os.environ.get('DB_PATH')
     or os.path.join(os.path.dirname(os.path.dirname(__file__)), 'kindergarten.db')
 )
+_DB_TIMEOUT = float(os.environ.get('SQLITE_BUSY_TIMEOUT_SECONDS', '5'))
+
+def _connect_db():
+    conn = sqlite3.connect(_DB_PATH, timeout=_DB_TIMEOUT)
+    conn.execute(f'PRAGMA busy_timeout={int(_DB_TIMEOUT * 1000)}')
+    conn.execute('PRAGMA synchronous=NORMAL')
+    return conn
 
 def _cache_student_names(students):
     """Cache student names in the database for notification lookups."""
     try:
-        conn = sqlite3.connect(_DB_PATH)
+        conn = _connect_db()
         conn.execute('''CREATE TABLE IF NOT EXISTS student_names (
             student_id VARCHAR(50) PRIMARY KEY,
             chinese_name VARCHAR(100),
@@ -36,7 +43,7 @@ def _cache_student_names(students):
 def _cache_teacher_scope(user_id, semester, teacher, teaching_classes, students):
     """Cache teacher → class and student → class mapping for targeted notifications."""
     try:
-        conn = sqlite3.connect(_DB_PATH)
+        conn = _connect_db()
         now = datetime.now().isoformat()
         conn.execute('''CREATE TABLE IF NOT EXISTS teacher_class_memberships (
             user_id VARCHAR(100) NOT NULL,

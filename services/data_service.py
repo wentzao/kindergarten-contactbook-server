@@ -3,6 +3,8 @@ import json
 import sqlite3
 from datetime import datetime
 
+DEFAULT_DB_TIMEOUT = float(os.environ.get('SQLITE_BUSY_TIMEOUT_SECONDS', '5'))
+
 class DataService:
     # Type label translations (English to Chinese)
     LEAVE_TYPES = {
@@ -30,9 +32,10 @@ class DataService:
         self._ensure_schema()
 
     def get_db(self):
-        # timeout=30: Python-level retry for up to 30 seconds on lock
-        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn = sqlite3.connect(self.db_path, timeout=DEFAULT_DB_TIMEOUT)
         conn.row_factory = sqlite3.Row
+        conn.execute(f'PRAGMA busy_timeout={int(DEFAULT_DB_TIMEOUT * 1000)}')
+        conn.execute('PRAGMA synchronous=NORMAL')
         return conn
 
     def _ensure_schema(self):
@@ -42,8 +45,10 @@ class DataService:
         are small and we want zero manual steps on deploy. Each ALTER is
         wrapped in try/except so re-runs are safe.
         """
-        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn = sqlite3.connect(self.db_path, timeout=DEFAULT_DB_TIMEOUT)
         try:
+            conn.execute('PRAGMA journal_mode=WAL')
+            conn.execute('PRAGMA synchronous=NORMAL')
             # signature_url for leave_records (added when 家長簽名 feature shipped)
             try:
                 conn.execute('ALTER TABLE leave_records ADD COLUMN signature_url TEXT')
