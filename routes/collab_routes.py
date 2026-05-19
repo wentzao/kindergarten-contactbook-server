@@ -40,32 +40,6 @@ MAX_TEXT_HISTORY_PER_BLOCK = 500
 _state_lock = threading.RLock()
 _documents = {}
 
-STATUS_RANK = {
-    'draft': 0,
-    'notified': 1,
-    'read': 2,
-    'signed': 3,
-}
-
-
-def _canonical_contact_book_status(row):
-    if not row:
-        return 'draft'
-
-    inferred = 'draft'
-    if row['signed_at']:
-        inferred = 'signed'
-    elif row['read_at']:
-        inferred = 'read'
-    elif row['notified_at']:
-        inferred = 'notified'
-
-    explicit = (row['status'] or '').strip().lower()
-    if explicit not in STATUS_RANK:
-        return inferred
-    return explicit if STATUS_RANK[explicit] >= STATUS_RANK[inferred] else inferred
-
-
 def _now():
     return datetime.now().strftime('%Y-%m-%dT%H:%M:%S+08:00')
 
@@ -551,17 +525,16 @@ def _save_note_snapshot(parsed, snapshot):
     conn = data_service.get_db()
     try:
         row = conn.execute(
-            '''SELECT id, status, notified_at, read_at, signed_at, original_teacher,
-                      items_to_bring, returned_items, survey_id
+            '''SELECT id, original_teacher, items_to_bring, returned_items, survey_id
                FROM contact_books WHERE student_id = ? AND date = ?''',
             (parsed['studentId'], parsed['date'])
         ).fetchone()
         teacher_json = json.dumps(note_data, ensure_ascii=False)
         if not row:
             conn.execute('''
-                INSERT INTO contact_books (student_id, date, year, month, status, original_teacher,
+                INSERT INTO contact_books (student_id, date, year, month, original_teacher,
                     items_to_bring, returned_items, survey_id, edited_by, last_modified)
-                VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (parsed['studentId'], parsed['date'], year, month, teacher_json,
                   items_to_bring, returned_items, survey_id, edited_by, now))
         else:
@@ -580,15 +553,12 @@ def _save_note_snapshot(parsed, snapshot):
                 if survey_id is None:
                     survey_id = row['survey_id']
             teacher_json = json.dumps(note_data, ensure_ascii=False)
-
-            current_status = _canonical_contact_book_status(row)
-            new_status = current_status if current_status in ('notified', 'read', 'signed') else 'draft'
             conn.execute('''
                 UPDATE contact_books SET original_teacher = ?, items_to_bring = ?,
-                    returned_items = ?, survey_id = ?, edited_by = ?, status = ?, last_modified = ?
+                    returned_items = ?, survey_id = ?, edited_by = ?, last_modified = ?
                 WHERE student_id = ? AND date = ?
             ''', (teacher_json, items_to_bring, returned_items, survey_id, edited_by,
-                  new_status, now, parsed['studentId'], parsed['date']))
+                  now, parsed['studentId'], parsed['date']))
         conn.commit()
         return {'updatedAt': now, 'studentId': parsed['studentId'], 'date': parsed['date']}
     finally:

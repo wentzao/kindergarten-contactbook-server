@@ -6,10 +6,7 @@ from services.teacher_notification_store import (
     get_unread_count,
     serialize_teacher_notification,
 )
-from services.contact_book_publish_service import (
-    ensure_scheduled_contact_book_notifications_table,
-    publish_contact_book_in_transaction,
-)
+from services import notification_grant_service as grant_service
 import json
 import os
 import traceback
@@ -18,30 +15,7 @@ notification_bp = Blueprint('notifications', __name__)
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 data_service = DataService(DATA_DIR)
 
-STATUS_RANK = {
-    'draft': 0,
-    'notified': 1,
-    'read': 2,
-    'signed': 3,
-}
 
-
-def _canonical_contact_book_status(row):
-    if not row:
-        return 'draft'
-
-    inferred = 'draft'
-    if row['signed_at']:
-        inferred = 'signed'
-    elif row['read_at']:
-        inferred = 'read'
-    elif row['notified_at']:
-        inferred = 'notified'
-
-    explicit = (row['status'] or '').strip().lower()
-    if explicit not in STATUS_RANK:
-        return inferred
-    return explicit if STATUS_RANK[explicit] >= STATUS_RANK[inferred] else inferred
 
 
 def ensure_tables():
@@ -109,17 +83,6 @@ def ensure_tables():
                 last_read_at VARCHAR(50) NOT NULL,
                 PRIMARY KEY (teacher_id, student_id)
             );
-
-            CREATE TABLE IF NOT EXISTS notification_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                class_name VARCHAR(100) NOT NULL,
-                date VARCHAR(20) NOT NULL,
-                student_count INTEGER NOT NULL,
-                student_ids TEXT,
-                sent_by VARCHAR(100),
-                sent_at VARCHAR(50) NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_nlog_class_date ON notification_logs(class_name, date);
         ''')
         ensure_teacher_notifications_table(conn)
         # Migration: add role column if it doesn't exist
@@ -146,12 +109,6 @@ def ensure_tables():
                 conn.commit()
             except Exception:
                 pass  # Column already exists
-        # Migration: add notified_at column to contact_books for batch notification tracking
-        try:
-            conn.execute('ALTER TABLE contact_books ADD COLUMN notified_at VARCHAR(50)')
-            conn.commit()
-        except Exception:
-            pass  # Column already exists
         conn.commit()
 
         # Enable WAL mode once at startup (safe here — no concurrent connections yet)
@@ -690,48 +647,32 @@ def get_pending_notifications():
     if not student_ids:
         return jsonify({'count': 0, 'entries': [], 'notifiedCount': 0}), 200
 
+    class_name = data.get('className')
     conn = None
     try:
         conn = data_service.get_db()
-        placeholders = ','.join('?' for _ in student_ids)
 
-        # Draft entries (teacher saved but not yet notified)
-        query = f'''
-            SELECT student_id, date, status, notified_at, read_at, signed_at FROM contact_books
-            WHERE student_id IN ({placeholders})
-        '''
-        params = list(student_ids)
-        if date_filter:
-            query += ' AND date = ?'
-            params.append(date_filter)
-        rows = conn.execute(query, params).fetchall()
-        entries = [
-            {'studentId': r['student_id'], 'date': r['date'], 'status': _canonical_contact_book_status(r)}
-            for r in rows
-            if _canonical_contact_book_status(r) == 'draft'
-        ]
+        # Schema v2: "notified" = covered by an active grant for (class, date).
+        # "draft" = NOT covered by a grant. The set of "entries to notify"
+        # is just the students that aren't in the grant yet for this date.
+        grant_student_ids = set()
+        if class_name and date_filter:
+            grant = grant_service.get_grant(conn, class_name, date_filter)
+            if grant and not grant['cancelled_at']:
+                grant_student_ids = set(grant_service._load_student_ids(grant['student_ids']))
 
-        # Already-notified student IDs (status in notified/read/signed)
-        notified_query = f'''
-            SELECT student_id, status, notified_at, read_at, signed_at FROM contact_books
-            WHERE student_id IN ({placeholders})
-        '''
-        notified_params = list(student_ids)
-        if date_filter:
-            notified_query += ' AND date = ?'
-            notified_params.append(date_filter)
-        notified_rows = conn.execute(notified_query, notified_params).fetchall()
-        notified_student_ids = [
-            r['student_id']
-            for r in notified_rows
-            if _canonical_contact_book_status(r) in ('notified', 'read', 'signed')
-        ]
-        notified_count = len(notified_student_ids)
+        entries = []
+        notified_student_ids = []
+        for sid in student_ids:
+            if sid in grant_student_ids:
+                notified_student_ids.append(sid)
+            elif date_filter:
+                entries.append({'studentId': sid, 'date': date_filter, 'status': 'draft'})
 
         return jsonify({
             'count': len(entries),
             'entries': entries,
-            'notifiedCount': notified_count,
+            'notifiedCount': len(notified_student_ids),
             'notifiedStudentIds': notified_student_ids,
         }), 200
     except Exception as e:
@@ -744,56 +685,38 @@ def get_pending_notifications():
 
 @notification_bp.route('/send-batch', methods=['POST'])
 def send_batch_notifications():
-    """Send contact book notifications in batch for completed but un-notified entries."""
+    """LEGACY: delegates to grant_service.grant_now.
+    New clients should use POST /api/notifications/grants/<class>/<date>."""
     data = request.json or {}
     student_ids = data.get('studentIds', [])
     date_filter = data.get('date')
-    class_name = data.get('className')
+    class_name = data.get('className') or ''
 
     if not student_ids:
         return jsonify({'error': 'studentIds is required'}), 400
+    if not date_filter:
+        return jsonify({'error': 'date is required'}), 400
+    if not class_name:
+        return jsonify({'error': 'className is required'}), 400
 
-    conn = None
     try:
-        conn = data_service.get_db()
-        ensure_scheduled_contact_book_notifications_table(conn)
-
-        now = datetime.now().isoformat()
-        sent_count = 0
-        student_names = data.get('studentNames', {})
-        target_date = date_filter
-
-        if class_name and target_date:
-            conn.execute(
-                'UPDATE class_journals SET notified_at = COALESCE(notified_at, ?) WHERE class_name = ? AND date = ?',
-                (now, class_name, target_date)
-            )
-
-        for sid in student_ids:
-            if not target_date:
-                continue
-            student_name = student_names.get(sid, sid)
-            publish_result = publish_contact_book_in_transaction(
-                conn,
-                sid,
-                target_date,
-                class_name=class_name or '',
-                student_name=student_name,
-                sent_by=data.get('sentBy') or '',
-                mode='batch',
-            )
-            if not publish_result['alreadyPublished']:
-                sent_count += 1
-
-        conn.commit()
-        return jsonify({'sent': sent_count, 'total': len(student_ids), 'deliveryQueued': sent_count}), 200
+        result = grant_service.grant_now(
+            data_service, class_name, date_filter, student_ids,
+            sent_by=data.get('sentBy') or '',
+            student_names=data.get('studentNames') or {},
+            mode='batch',
+        )
+        pushed = result.get('pushedStudentIds', [])
+        return jsonify({
+            'sent': len(pushed),
+            'total': len(student_ids),
+            'deliveryQueued': len(pushed),
+            'grant': result.get('grant'),
+        }), 200
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
-        if conn:
-            conn.rollback()
         return jsonify({'error': str(e)}), 500
-    finally:
-        if conn:
-            conn.close()
 
 
 
@@ -813,24 +736,30 @@ def get_checklist(class_name, date):
 
     conn = data_service.get_db()
     try:
-        # Check class journal
+        # Check class journal (content only)
         journal = conn.execute(
-            'SELECT content_blocks, notified_at FROM class_journals WHERE class_name = ? AND date = ?',
+            'SELECT content_blocks FROM class_journals WHERE class_name = ? AND date = ?',
             (class_name, date)
         ).fetchone()
         journal_blocks = json.loads(journal['content_blocks']) if journal and journal['content_blocks'] else []
+
+        # Check the (class, date) grant
+        grant = grant_service.get_grant(conn, class_name, date)
+        grant_dict = grant_service.serialize_grant(grant)
+        grant_student_ids = set(grant_dict['studentIds']) if grant_dict and not grant_dict.get('cancelledAt') else set()
+
         journal_info = {
             'exists': len(journal_blocks) > 0,
             'blockCount': len(journal_blocks),
-            'alreadyNotified': bool(journal['notified_at']) if journal else False,
+            'alreadyNotified': bool(grant_dict and not grant_dict.get('cancelledAt')),
         }
 
-        # Check each student's contact book
+        # Check each student's contact book entry
         students = []
         for sid in student_ids:
             row = conn.execute(
                 '''
-                SELECT original_teacher, status, notified_at, read_at, signed_at
+                SELECT original_teacher, read_at, signed_at
                 FROM contact_books
                 WHERE student_id = ? AND date = ?
                 ''',
@@ -845,17 +774,27 @@ def get_checklist(class_name, date):
                 has_notes = len(blocks) > 0 or bool(note and note.strip())
                 has_health = bool(teacher_data.get('health') or teacher_data.get('mood'))
 
+            if row and row['signed_at']:
+                stat = 'signed'
+            elif row and row['read_at']:
+                stat = 'read'
+            elif sid in grant_student_ids:
+                stat = 'notified'
+            else:
+                stat = 'draft'
+
             students.append({
                 'id': sid,
                 'name': student_names.get(sid, sid),
                 'hasNotes': has_notes,
                 'hasHealth': has_health,
-                'status': _canonical_contact_book_status(row) if row else None,
-                'notifiedAt': row['notified_at'] if row else None,
+                'status': stat,
+                'notifiedAt': grant_dict['notifiedAt'] if (grant_dict and sid in grant_student_ids) else None,
             })
 
         return jsonify({
             'journal': journal_info,
+            'grant': grant_dict,
             'students': students,
             'filledCount': sum(1 for s in students if s['hasNotes'] or s['hasHealth']),
             'totalCount': len(students),
@@ -867,12 +806,13 @@ def get_checklist(class_name, date):
 
 
 # ==========================================
-# Notification Logs
+# Notification Logs (now derived from class_notification_grants)
 # ==========================================
 
 @notification_bp.route('/logs', methods=['GET'])
 def get_notification_logs():
-    """Get notification send logs. Supports ?date= (single day) or ?className= (all history for class)."""
+    """Notification history. Reads from class_notification_grants in Schema v2.
+    Supports ?date= (single day) or ?className= (all history for class)."""
     date = request.args.get('date')
     class_name = request.args.get('className')
     limit = int(request.args.get('limit', 50))
@@ -881,39 +821,38 @@ def get_notification_logs():
     try:
         conn = data_service.get_db()
 
-        # Build query
-        conditions = []
+        conditions = ['g.cancelled_at IS NULL']
         params = []
         if date:
-            conditions.append('n.date = ?')
+            conditions.append('g.date = ?')
             params.append(date)
         if class_name:
-            conditions.append('n.class_name = ?')
+            conditions.append('g.class_name = ?')
             params.append(class_name)
 
-        where = f"WHERE {' AND '.join(conditions)}" if conditions else ''
+        where = f"WHERE {' AND '.join(conditions)}"
         rows = conn.execute(f'''
-            SELECT n.*, t.cname, t.ename
-            FROM notification_logs n
-            LEFT JOIN teacher_profiles t ON n.sent_by = t.user_id
+            SELECT g.*, t.cname, t.ename
+            FROM class_notification_grants g
+            LEFT JOIN teacher_profiles t ON g.sent_by = t.user_id
             {where}
-            ORDER BY n.sent_at DESC
+            ORDER BY g.notified_at DESC
             LIMIT ?
         ''', (*params, limit)).fetchall()
 
         logs = {}
         for r in rows:
             cn = r['class_name']
+            sids = json.loads(r['student_ids']) if r['student_ids'] else []
             if cn not in logs:
                 logs[cn] = []
             logs[cn].append({
-                'id': r['id'],
                 'date': r['date'],
-                'studentCount': r['student_count'],
-                'studentIds': json.loads(r['student_ids']) if r['student_ids'] else [],
+                'studentCount': len(sids),
+                'studentIds': sids,
                 'sentBy': r['sent_by'],
                 'sentByName': r['cname'] or r['ename'] or r['sent_by'] or '',
-                'sentAt': r['sent_at'],
+                'sentAt': r['notified_at'],
             })
 
         return jsonify({'logs': logs}), 200

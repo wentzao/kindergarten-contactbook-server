@@ -292,7 +292,6 @@ class DataService:
                     'semester': r['semester'],
                     'contentBlocks': json.loads(r['content_blocks']) if r['content_blocks'] else [],
                     'editedBy': json.loads(r['edited_by']) if r['edited_by'] else None,
-                    'notifiedAt': r['notified_at'],
                     'createdAt': r['created_at'],
                     'updatedAt': r['updated_at'],
                 }
@@ -327,20 +326,6 @@ class DataService:
                 'editedBy': edited_by,
                 'updatedAt': now,
             }
-        finally:
-            conn.close()
-
-    def publish_class_journal(self, class_name, date):
-        """Mark class journal as notified/published."""
-        conn = self.get_db()
-        try:
-            now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S+08:00')
-            cursor = conn.execute(
-                'UPDATE class_journals SET notified_at = ? WHERE class_name = ? AND date = ?',
-                (now, class_name, date)
-            )
-            conn.commit()
-            return cursor.rowcount > 0
         finally:
             conn.close()
 

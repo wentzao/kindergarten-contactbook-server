@@ -89,6 +89,13 @@ def teacher_payload_has_visible_content(
     if isinstance(blocks, list) and any(_block_has_visible_content(block) for block in blocks):
         return True
 
+    # Health/mood fields count as visible content. Without this, saving only
+    # health pills (mood/appetite/nap/...) would be treated as an "empty"
+    # save and the merge logic would overwrite with stale data.
+    for key in ('mood', 'health', 'appetite', 'nap', 'bowel'):
+        if _trimmed(payload.get(key)):
+            return True
+
     for values in (items_to_bring, returned_items, attached_items):
         if isinstance(values, list) and any(_trimmed(item) for item in values):
             return True

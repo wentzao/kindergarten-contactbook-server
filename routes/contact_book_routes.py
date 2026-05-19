@@ -1,21 +1,21 @@
+"""Contact book routes — Schema v2.
+
+Key change from v1:
+  • Parent-visibility is OWNED by class_notification_grants, NOT by
+    contact_books.status.
+  • contact_books is now a sparse table — only rows that have actual
+    content (teacher note, parent read/sign, comments, ...) exist.
+  • Parent read path joins grants → class_journals + contact_books.
+"""
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 from urllib.parse import unquote
 import json
 import threading
+import os
 import requests as http_requests
+
 from services.data_service import DataService
-from services.contact_book_publish_service import (
-    cancel_scheduled_contact_book_publish,
-    ensure_scheduled_contact_book_notifications_table,
-    get_publish_events,
-    get_pending_schedule_map,
-    get_pending_schedule_map_for_date,
-    publish_contact_book_now,
-    schedule_contact_book_dismissal_publish,
-    serialize_scheduled_notification,
-    start_scheduled_contact_book_notification_worker,
-)
 from services.push_outbox_service import (
     EVENT_CONTACT_BOOK_PARENT_COMMENT,
     EVENT_CONTACT_BOOK_PARENT_COMMENT_DELETED,
@@ -30,13 +30,210 @@ from services.contact_book_teacher_payload import (
     merge_existing_visible_content_if_empty,
     normalize_teacher_payload,
 )
-import os
+from services import notification_grant_service as grant_service
 
 
-def _upsert_parent_profile(user_id: str, display_name: str, picture_url: str):
-    """Background task: upsert parent_profiles, re-fetching avatar blob if URL changed."""
+contact_book_bp = Blueprint('contact_book', __name__)
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
+data_service = DataService(DATA_DIR)
+
+DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六']
+
+# Derived "status" exposed to clients (computed, not stored in DB).
+DERIVED_NOTIFIED = 'notified'   # grant exists, parent hasn't read
+DERIVED_READ = 'read'           # parent has read
+DERIVED_SIGNED = 'signed'       # parent has signed
+
+
+# ──────────────────────────────────────────────────────────
+# Background worker startup
+# ──────────────────────────────────────────────────────────
+grant_service.start_scheduled_notification_worker(data_service)
+start_push_outbox_worker(data_service)
+
+
+# ──────────────────────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────────────────────
+
+def load_json(val):
+    if not val:
+        return None
+    try:
+        return json.loads(val)
+    except Exception:
+        return None
+
+
+def _is_truthy_flag(value):
+    if value is None:
+        return False
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+
+
+def _day_of_week(date_str):
+    try:
+        y, m, d = map(int, date_str.split('-'))
+        dow_index = datetime(y, m, d).weekday()  # 0=Mon ... 6=Sun
+        return DAY_NAMES[(dow_index + 1) % 7]
+    except Exception:
+        return ''
+
+
+def _resolve_teacher_name(user_id, profiles):
+    if not user_id or not profiles:
+        return None
+    p = profiles.get(user_id)
+    if p:
+        return {'userId': user_id, 'cname': p.get('cname', ''), 'ename': p.get('ename', '')}
+    return {'userId': user_id, 'cname': '', 'ename': ''}
+
+
+def _load_teacher_profiles(conn):
+    try:
+        rows = conn.execute('SELECT user_id, cname, ename FROM teacher_profiles').fetchall()
+        return {r['user_id']: {'cname': r['cname'], 'ename': r['ename']} for r in rows}
+    except Exception:
+        return {}
+
+
+def _enrich_edited_by(edited_by_raw, profiles):
+    if edited_by_raw and profiles:
+        uid = edited_by_raw.get('userId', '')
+        resolved = _resolve_teacher_name(uid, profiles)
+        if resolved:
+            if resolved['cname']:
+                edited_by_raw['cname'] = resolved['cname']
+            if resolved['ename']:
+                edited_by_raw['ename'] = resolved['ename']
+    return edited_by_raw
+
+
+def _enrich_comments(comments, profiles):
+    if not comments or not profiles:
+        return comments
+    for c in comments:
+        sid = c.get('senderId', '')
+        if sid and sid != 'parent':
+            resolved = _resolve_teacher_name(sid, profiles)
+            if resolved:
+                c['cname'] = resolved['cname']
+                c['ename'] = resolved['ename']
+    return comments
+
+
+def _derived_status(read_at, signed_at, has_grant):
+    if signed_at:
+        return DERIVED_SIGNED
+    if read_at:
+        return DERIVED_READ
+    if has_grant:
+        return DERIVED_NOTIFIED
+    return 'draft'
+
+
+def _row_to_record(row, profiles=None, has_grant=False, class_journal=None,
+                   scheduled_notification=None):
+    """Convert one contact_books row → parent/teacher facing record dict.
+    `row` may be None (= grant exists but no individual data yet)."""
+    if row:
+        date_str = row['date']
+        read_at = row['read_at']
+        signed_at = row['signed_at']
+        original_teacher = normalize_teacher_payload(load_json(row['original_teacher'])) or None
+        original_parent = load_json(row['original_parent'])
+        edited_by_raw = _enrich_edited_by(load_json(row['edited_by']), profiles)
+        comments = _enrich_comments(load_json(row['comments']) or [], profiles)
+        items_to_bring = load_json(row['items_to_bring'])
+        returned_items = load_json(row['returned_items']) or []
+        attached_items = load_json(row['attached_items']) or []
+        survey_id = row['survey_id']
+        parent_signature_url = row['parent_signature_url']
+    else:
+        # placeholder record — grant exists, no row yet
+        date_str = None  # caller supplies it
+        read_at = None
+        signed_at = None
+        original_teacher = None
+        original_parent = None
+        edited_by_raw = None
+        comments = []
+        items_to_bring = None
+        returned_items = []
+        attached_items = []
+        survey_id = None
+        parent_signature_url = None
+
+    rec = {
+        'date': date_str,
+        'dayOfWeek': _day_of_week(date_str) if date_str else '',
+        'status': _derived_status(read_at, signed_at, has_grant),
+        'readAt': read_at,
+        'signedAt': signed_at,
+        'parentSignatureUrl': parent_signature_url,
+        'itemsToBring': items_to_bring,
+        'returnedItems': returned_items,
+        'attachedItems': attached_items,
+        'comments': comments,
+        'surveyId': survey_id,
+        'editedBy': edited_by_raw,
+        'teacher': original_teacher,
+        'parent': original_parent,
+        'classJournal': class_journal,
+        'scheduledNotification': scheduled_notification,
+    }
+    return rec
+
+
+def _build_journal_map(conn, class_name, date_filter_like, profiles):
+    """Return {date: classJournal dict} for a class within a date-range."""
+    if not class_name:
+        return {}
+    rows = conn.execute(
+        '''
+        SELECT date, content_blocks, edited_by, updated_at, semester
+        FROM class_journals
+        WHERE class_name = ? AND date LIKE ?
+        ''',
+        (class_name, date_filter_like),
+    ).fetchall()
+    out = {}
+    for r in rows:
+        out[r['date']] = {
+            'semester': r['semester'],
+            'contentBlocks': load_json(r['content_blocks']) or [],
+            'editedBy': _enrich_edited_by(load_json(r['edited_by']), profiles),
+            'updatedAt': r['updated_at'],
+        }
+    return out
+
+
+def _build_schedule_map(conn, class_name, date_filter_like):
+    """Return {date: scheduled_notification dict} for a class within a date-range."""
+    if not class_name:
+        return {}
+    rows = conn.execute(
+        '''
+        SELECT * FROM scheduled_class_notifications
+        WHERE class_name = ? AND date LIKE ? AND status = ?
+        ORDER BY send_at DESC, id DESC
+        ''',
+        (class_name, date_filter_like, grant_service.SCHEDULE_PENDING),
+    ).fetchall()
+    out = {}
+    for r in rows:
+        out.setdefault(r['date'], grant_service.serialize_scheduled_notification(r))
+    return out
+
+
+# ──────────────────────────────────────────────────────────
+# Parent profile upsert (used by addComment)
+# ──────────────────────────────────────────────────────────
+
+def _upsert_parent_profile(user_id, display_name, picture_url):
     if not user_id:
         return
+    conn = None
     try:
         conn = data_service.get_db()
         now = datetime.now().isoformat()
@@ -59,430 +256,283 @@ def _upsert_parent_profile(user_id: str, display_name: str, picture_url: str):
         if row is None:
             conn.execute(
                 'INSERT INTO parent_profiles (user_id, display_name, picture_url, picture_data, picture_mime, updated_at) VALUES (?,?,?,?,?,?)',
-                (user_id, display_name, picture_url, blob, mime, now)
+                (user_id, display_name, picture_url, blob, mime, now),
             )
         else:
             if fetch_blob and blob:
                 conn.execute(
                     'UPDATE parent_profiles SET display_name=?, picture_url=?, picture_data=?, picture_mime=?, updated_at=? WHERE user_id=?',
-                    (display_name, picture_url, blob, mime, now, user_id)
+                    (display_name, picture_url, blob, mime, now, user_id),
                 )
             else:
                 conn.execute(
                     'UPDATE parent_profiles SET display_name=?, updated_at=? WHERE user_id=?',
-                    (display_name, now, user_id)
+                    (display_name, now, user_id),
                 )
         conn.commit()
     except Exception as e:
         print(f'[ParentProfile] upsert error: {e}')
     finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
-
-contact_book_bp = Blueprint('contact_book', __name__)
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
-data_service = DataService(DATA_DIR)
-
-STATUS_DRAFT = 'draft'
-STATUS_NOTIFIED = 'notified'
-STATUS_READ = 'read'
-STATUS_SIGNED = 'signed'
-VALID_CONTACT_BOOK_STATUSES = {
-    STATUS_DRAFT,
-    STATUS_NOTIFIED,
-    STATUS_READ,
-    STATUS_SIGNED,
-}
-STATUS_RANK = {
-    STATUS_DRAFT: 0,
-    STATUS_NOTIFIED: 1,
-    STATUS_READ: 2,
-    STATUS_SIGNED: 3,
-}
-
-
-def _normalize_status_value(value):
-    if value is None:
-        return None
-    normalized = str(value).strip().lower()
-    return normalized if normalized in VALID_CONTACT_BOOK_STATUSES else None
-
-
-def _canonical_contact_book_status(status_value, notified_at=None, read_at=None, signed_at=None):
-    inferred = STATUS_DRAFT
-    if signed_at:
-        inferred = STATUS_SIGNED
-    elif read_at:
-        inferred = STATUS_READ
-    elif notified_at:
-        inferred = STATUS_NOTIFIED
-
-    explicit = _normalize_status_value(status_value)
-    if explicit is None:
-        return inferred
-
-    return explicit if STATUS_RANK[explicit] >= STATUS_RANK[inferred] else inferred
-
-
-# Auto-migrate: add edited_by column if missing + canonicalize status data
-def _auto_migrate():
-    conn = None
-    try:
-        conn = data_service.get_db()
-        ensure_scheduled_contact_book_notifications_table(conn)
-        cols = [row[1] for row in conn.execute('PRAGMA table_info(contact_books)').fetchall()]
-        if 'edited_by' not in cols:
-            conn.execute('ALTER TABLE contact_books ADD COLUMN edited_by TEXT')
-            conn.commit()
-            print('[Migration] Added edited_by column to contact_books')
-
-        rows = conn.execute(
-            'SELECT id, status, notified_at, read_at, signed_at FROM contact_books'
-        ).fetchall()
-        updated = 0
-        for row in rows:
-            canonical = _canonical_contact_book_status(
-                row['status'],
-                row['notified_at'],
-                row['read_at'],
-                row['signed_at'],
-            )
-            if row['status'] != canonical:
-                conn.execute(
-                    'UPDATE contact_books SET status = ? WHERE id = ?',
-                    (canonical, row['id'])
-                )
-                updated += 1
-        if updated > 0:
-            conn.commit()
-            print(f'[Migration] Canonicalized contact_books.status rows: {updated}')
-    except Exception as e:
-        print(f'[Migration] Error: {e}')
-    finally:
         if conn:
-            conn.close()
-
-_auto_migrate()
-start_scheduled_contact_book_notification_worker(data_service)
-start_push_outbox_worker(data_service)
-
-# Lazy import to avoid circular imports or missing dependencies
-def _get_notifier():
-    try:
-        from services.send_notification import notify_teachers_new_comment
-        return notify_teachers_new_comment
-    except Exception as e:
-        print(f'[Notification] Failed to import sender: {e}')
-        return None
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
-def _get_status_notifier():
-    try:
-        from services.send_notification import notify_teachers_status_update
-        return notify_teachers_status_update
-    except Exception as e:
-        print(f'[Notification] Failed to import status notifier: {e}')
-        return None
+# ──────────────────────────────────────────────────────────
+# UPSERT helper for contact_books (sparse INSERT)
+# ──────────────────────────────────────────────────────────
 
-
-def _get_parent_record_notifier():
-    try:
-        from services.send_notification import notify_parents_new_record
-        return notify_parents_new_record
-    except Exception as e:
-        print(f'[Notification] Failed to import parent record notifier: {e}')
-        return None
-
-
-def _get_parent_comment_notifier():
-    try:
-        from services.send_notification import notify_parents_new_comment
-        return notify_parents_new_comment
-    except Exception as e:
-        print(f'[Notification] Failed to import parent comment notifier: {e}')
-        return None
-
-
-def _get_comment_deleted_notifier():
-    try:
-        from services.send_notification import notify_teachers_comment_deleted
-        return notify_teachers_comment_deleted
-    except Exception as e:
-        print(f'[Notification] Failed to import comment-deleted notifier: {e}')
-        return None
-
-
-def _get_parent_comment_deleted_notifier():
-    try:
-        from services.send_notification import notify_parents_comment_deleted
-        return notify_parents_comment_deleted
-    except Exception as e:
-        print(f'[Notification] Failed to import parent comment-deleted notifier: {e}')
-        return None
-
-# Helper to deserialize json fields safely
-def load_json(val):
-    if not val:
-        return None
-    try:
-        return json.loads(val)
-    except:
-        return None
-
-DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六']
-
-
-def _is_truthy_flag(value):
-    if value is None:
-        return False
-    return str(value).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
-
-def _resolve_teacher_name(user_id, profiles):
-    """Resolve userId to {cname, ename} from teacher_profiles cache."""
-    if not user_id or not profiles:
-        return None
-    p = profiles.get(user_id)
-    if p:
-        return {'userId': user_id, 'cname': p.get('cname', ''), 'ename': p.get('ename', '')}
-    return {'userId': user_id, 'cname': '', 'ename': ''}
-
-
-def _load_teacher_profiles(conn):
-    """Load all teacher profiles from DB into a dict."""
-    try:
-        rows = conn.execute('SELECT user_id, cname, ename FROM teacher_profiles').fetchall()
-        return {r['user_id']: {'cname': r['cname'], 'ename': r['ename']} for r in rows}
-    except Exception:
-        return {}
-
-
-def format_record(r, version='original', teacher_profiles=None, scheduled_notification=None):
-    # Compute dayOfWeek from date if not stored
-    date_str = r['date']
-    stored_dow = r['day_of_week']
-    if not stored_dow:
-        try:
-            y, m, d = map(int, date_str.split('-'))
-            dow_index = datetime(y, m, d).weekday()  # 0=Mon ... 6=Sun
-            stored_dow = DAY_NAMES[(dow_index + 1) % 7]  # Convert to Chinese
-        except:
-            stored_dow = ''
-
-    status = _canonical_contact_book_status(
-        r['status'],
-        r['notified_at'],
-        r['read_at'],
-        r['signed_at'],
+def _ensure_contact_book_row(conn, student_id, date_key):
+    """Insert an empty row if it doesn't exist. Returns the row id and existed flag."""
+    year, month, _ = map(int, date_key.split('-'))
+    row = conn.execute(
+        'SELECT id FROM contact_books WHERE student_id = ? AND date = ?',
+        (student_id, date_key),
+    ).fetchone()
+    if row:
+        return row['id'], True
+    now = datetime.now().isoformat()
+    cursor = conn.execute(
+        '''
+        INSERT INTO contact_books (student_id, date, year, month, last_modified)
+        VALUES (?, ?, ?, ?, ?)
+        ''',
+        (student_id, date_key, year, month, now),
     )
+    return cursor.lastrowid, False
 
-    # Resolve editedBy userId → cname/ename (cache overrides stored names if available)
-    edited_by_raw = load_json(r['edited_by'])
-    if edited_by_raw and teacher_profiles:
-        uid = edited_by_raw.get('userId', '')
-        resolved = _resolve_teacher_name(uid, teacher_profiles)
-        if resolved:
-            if resolved['cname']:
-                edited_by_raw['cname'] = resolved['cname']
-            if resolved['ename']:
-                edited_by_raw['ename'] = resolved['ename']
 
-    # Resolve comment sender names
-    comments = load_json(r['comments']) or []
-    if teacher_profiles:
-        for c in comments:
-            sid = c.get('senderId', '')
-            if sid and sid != 'parent':
-                resolved = _resolve_teacher_name(sid, teacher_profiles)
-                if resolved:
-                    c['cname'] = resolved['cname']
-                    c['ename'] = resolved['ename']
-
-    # parent_signature_url may not exist on old rows / older DB schemas — guard.
-    try:
-        parent_signature_url = r['parent_signature_url']
-    except (IndexError, KeyError):
-        parent_signature_url = None
-
-    original_teacher = normalize_teacher_payload(load_json(r['original_teacher']))
-
-    rec = {
-        'date': date_str,
-        'dayOfWeek': stored_dow,
-        'status': status,
-        'readAt': r['read_at'],
-        'signedAt': r['signed_at'],
-        'notifiedAt': r['notified_at'],
-        'parentSignatureUrl': parent_signature_url,
-        'itemsToBring': load_json(r['items_to_bring']),
-        'returnedItems': load_json(r['returned_items']) or [],
-        'attachedItems': load_json(r['attached_items']) or [],
-        'original': {
-            'teacher': original_teacher,
-            'parent': load_json(r['original_parent'])
-        },
-        'redacted': load_json(r['redacted']),
-        'comments': comments,
-        'surveyId': r['survey_id'],
-        'editedBy': edited_by_raw,
-        'scheduledNotification': serialize_scheduled_notification(scheduled_notification),
-    }
-
-    # Apply versioning overlay (original or redacted)
-    if version == 'redacted' and rec['redacted']:
-        rec['teacher'] = rec['redacted'].get('teacher')
-        rec['parent'] = rec['redacted'].get('parent')
-    else:
-        rec['teacher'] = rec['original'].get('teacher')
-        rec['parent'] = rec['original'].get('parent')
-
-    # Backward compatibility for older clients that read teacher fields from the
-    # record root instead of the nested `teacher` object.
-    if rec.get('teacher'):
-        for key in (
-            'note', 'mood', 'health', 'appetite', 'nap', 'bowel',
-            'updatedAt', 'updatedBy', 'blocks', 'hideJournal'
-        ):
-            if rec['teacher'].get(key) is not None:
-                rec[key] = rec['teacher'].get(key)
-
-    return rec
+# ──────────────────────────────────────────────────────────
+# GET /<student_id>/months
+# ──────────────────────────────────────────────────────────
 
 @contact_book_bp.route('/<student_id>/months', methods=['GET'])
 def get_available_months(student_id):
-    """Get list of available months for a student's contact book"""
-    conn = data_service.get_db()
-    try:
-        include_unpublished = _is_truthy_flag(request.args.get('includeUnpublished'))
-        if include_unpublished:
-            rows = conn.execute(
-                'SELECT DISTINCT year, month FROM contact_books WHERE student_id = ? ORDER BY year ASC, month ASC',
-                (student_id,)
-            ).fetchall()
-        else:
-            # Parent-safe default:
-            # only expose months with records that have been published/read/signed.
-            rows = conn.execute(
-                '''
-                SELECT DISTINCT year, month
-                FROM contact_books
-                WHERE student_id = ?
-                  AND (
-                    status IN ('notified', 'read', 'signed')
-                    OR notified_at IS NOT NULL
-                    OR read_at IS NOT NULL
-                    OR signed_at IS NOT NULL
-                  )
-                ORDER BY year ASC, month ASC
-                ''',
-                (student_id,)
-            ).fetchall()
-        months = [f"{r['year']}-{r['month']:02d}" for r in rows]
-        return jsonify(months), 200
-    finally:
-        conn.close()
-
-@contact_book_bp.route('/<student_id>/<int:year>/<int:month>', methods=['GET'])
-def get_contact_book(student_id, year, month):
-    version = request.args.get('version', 'original')
+    """List months that have anything visible to this student.
+    Parent path (default): unions months from `class_notification_grants`
+    (where student is in student_ids) with months from `contact_books`
+    rows that have read_at/signed_at/comments. That way past signed months
+    show up too.
+    Teacher path (`?includeUnpublished=true`): all months that have ANY
+    contact_books row for the student."""
     class_name = request.args.get('className')
-    # Safe-by-default: drafts (status='draft' with no notified/read/signed timestamps)
-    # are excluded unless the caller explicitly opts in. Teacher web passes
-    # ?includeUnpublished=true; parent app does not.
     include_unpublished = _is_truthy_flag(request.args.get('includeUnpublished'))
     conn = data_service.get_db()
     try:
-        profiles = _load_teacher_profiles(conn)
+        months = set()
         if include_unpublished:
             rows = conn.execute(
-                'SELECT * FROM contact_books WHERE student_id = ? AND year = ? AND month = ? ORDER BY date ASC',
-                (student_id, year, month),
+                'SELECT DISTINCT year, month FROM contact_books WHERE student_id = ?',
+                (student_id,),
             ).fetchall()
+            for r in rows:
+                months.add(f"{r['year']}-{r['month']:02d}")
         else:
+            # 1. From grants (parent-visible dates)
+            grant_rows = grant_service.get_visible_grants_for_student(
+                conn, student_id, class_name=class_name,
+            )
+            for g in grant_rows:
+                months.add(g['date'][:7])
+            # 2. Also include months with any read/signed/comments row,
+            #    so signed history is reachable even if a grant was later cancelled.
             rows = conn.execute(
                 '''
-                SELECT *
-                FROM contact_books
-                WHERE student_id = ? AND year = ? AND month = ?
-                  AND (
-                    status IN ('notified', 'read', 'signed')
-                    OR notified_at IS NOT NULL
-                    OR read_at IS NOT NULL
-                    OR signed_at IS NOT NULL
-                  )
-                ORDER BY date ASC
+                SELECT DISTINCT year, month FROM contact_books
+                WHERE student_id = ?
+                  AND (read_at IS NOT NULL OR signed_at IS NOT NULL OR comments IS NOT NULL)
                 ''',
-                (student_id, year, month),
+                (student_id,),
             ).fetchall()
-        if not rows:
-            return jsonify({'studentId': student_id, 'year': year, 'month': month, 'records': []}), 200
+            for r in rows:
+                months.add(f"{r['year']}-{r['month']:02d}")
+        return jsonify(sorted(months)), 200
+    finally:
+        conn.close()
 
-        schedule_map = get_pending_schedule_map(conn, student_id, [r['date'] for r in rows])
-        records = [
-            format_record(r, version, profiles, schedule_map.get(r['date']))
-            for r in rows
-        ]
 
-        # Embed class journal blocks if className is provided
-        # Only show journal for dates where THIS STUDENT has been notified (per-student check)
-        if class_name:
-            journal_map = {}
-            journal_rows = conn.execute(
-                'SELECT date, content_blocks, edited_by, updated_at FROM class_journals WHERE class_name = ? AND date LIKE ?',
-                (class_name, f'{year}-{month:02d}-%')
-            ).fetchall()
-            for jr in journal_rows:
-                j_edited_by = load_json(jr['edited_by'])
-                # Enrich journal editedBy from teacher_profiles cache
-                if j_edited_by and profiles:
-                    uid = j_edited_by.get('userId', '')
-                    resolved = _resolve_teacher_name(uid, profiles)
-                    if resolved:
-                        if resolved['cname']:
-                            j_edited_by['cname'] = resolved['cname']
-                        if resolved['ename']:
-                            j_edited_by['ename'] = resolved['ename']
-                journal_map[jr['date']] = {
-                    'contentBlocks': load_json(jr['content_blocks']) or [],
-                    'editedBy': j_edited_by,
-                    'updatedAt': jr['updated_at'],
-                }
-            for rec in records:
-                # Only include journal if student's status is notified/read/signed
-                if rec.get('status') in ('notified', 'read', 'signed') and rec['date'] in journal_map:
-                    rec['classJournal'] = journal_map[rec['date']]
-                else:
-                    rec['classJournal'] = None
+# ──────────────────────────────────────────────────────────
+# GET /<student_id>/<year>/<month>
+# ──────────────────────────────────────────────────────────
 
-        data = {
+@contact_book_bp.route('/<student_id>/<int:year>/<int:month>', methods=['GET'])
+def get_contact_book(student_id, year, month):
+    """Return all records for (student, year, month).
+
+    Parent path: keyed by class_notification_grants — every date the student
+    can view appears in records[], even if the contact_books row is missing
+    or the class journal is missing.
+
+    Teacher path (?includeUnpublished=true): keyed by contact_books rows —
+    same as before.
+    """
+    class_name = request.args.get('className')
+    include_unpublished = _is_truthy_flag(request.args.get('includeUnpublished'))
+    date_like = f'{year}-{month:02d}-%'
+
+    conn = data_service.get_db()
+    try:
+        profiles = _load_teacher_profiles(conn)
+
+        # Fetch row map (date → contact_books row) for whichever dates we end up listing
+        all_rows = conn.execute(
+            'SELECT * FROM contact_books WHERE student_id = ? AND year = ? AND month = ?',
+            (student_id, year, month),
+        ).fetchall()
+        row_map = {r['date']: r for r in all_rows}
+
+        # Determine the date list
+        if include_unpublished:
+            dates = sorted(row_map.keys())
+            grant_dates = set()
+            if class_name:
+                grant_rows = grant_service.get_visible_grants_for_student(
+                    conn, student_id, class_name=class_name, date_like=date_like,
+                )
+                grant_dates = {g['date'] for g in grant_rows}
+        else:
+            grant_rows = grant_service.get_visible_grants_for_student(
+                conn, student_id, class_name=class_name, date_like=date_like,
+            ) if class_name else []
+            grant_dates = {g['date'] for g in grant_rows}
+            # Also include dates with parent action (read/signed/comments) — keeps
+            # past signed records visible even if the grant was later cancelled.
+            action_dates = {
+                r['date'] for r in all_rows
+                if r['read_at'] or r['signed_at'] or r['comments']
+            }
+            dates = sorted(grant_dates | action_dates)
+
+        journal_map = _build_journal_map(conn, class_name, date_like, profiles)
+        schedule_map = _build_schedule_map(conn, class_name, date_like)
+
+        records = []
+        for date_str in dates:
+            row = row_map.get(date_str)
+            has_grant = date_str in grant_dates
+            # Class journal is shown only if the date is parent-visible
+            # (or it's the teacher path with includeUnpublished).
+            journal = journal_map.get(date_str) if (has_grant or include_unpublished) else None
+            rec = _row_to_record(
+                row, profiles=profiles, has_grant=has_grant,
+                class_journal=journal,
+                scheduled_notification=schedule_map.get(date_str),
+            )
+            rec['date'] = date_str
+            rec['dayOfWeek'] = _day_of_week(date_str)
+            records.append(rec)
+
+        last_modified_values = [r['last_modified'] for r in all_rows if r['last_modified']]
+        last_modified = max(last_modified_values) if last_modified_values else datetime.now().isoformat()
+
+        return jsonify({
             'studentId': student_id,
             'year': year,
             'month': month,
             'records': records,
-            'metadata': {'lastModified': rows[0]['last_modified'] if rows and rows[0]['last_modified'] else datetime.now().isoformat()}
-        }
-        return jsonify(data), 200
+            'metadata': {'lastModified': last_modified},
+        }), 200
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
 
-@contact_book_bp.route('/<student_id>/<date>/parent', methods=['PUT'])
-def update_parent_entry(student_id, date):
-    data = request.json
-    year, month, day = map(int, date.split('-'))
+
+# ──────────────────────────────────────────────────────────
+# GET /<student_id>/latest
+# ──────────────────────────────────────────────────────────
+
+@contact_book_bp.route('/<student_id>/latest', methods=['GET'])
+def get_latest_records(student_id):
+    """Return the N latest parent-visible records for a student.
+    Parent path uses grants; teacher path uses contact_books rows."""
+    limit = max(1, min(request.args.get('limit', 10, type=int), 100))
+    class_name = request.args.get('className')
+    include_unpublished = _is_truthy_flag(request.args.get('includeUnpublished'))
+
     conn = data_service.get_db()
     try:
-        row = conn.execute('SELECT original_parent FROM contact_books WHERE student_id = ? AND date = ?', (student_id, date)).fetchone()
-        if not row:
-            conn.execute('''
-                INSERT INTO contact_books (student_id, date, year, month, status, original_parent, last_modified)
-                VALUES (?, ?, ?, ?, 'draft', ?, ?)
-            ''', (student_id, date, year, month, json.dumps(data, ensure_ascii=False), datetime.now().isoformat()))
+        profiles = _load_teacher_profiles(conn)
+
+        if include_unpublished:
+            rows = conn.execute(
+                'SELECT * FROM contact_books WHERE student_id = ? ORDER BY date DESC LIMIT ?',
+                (student_id, limit),
+            ).fetchall()
+            records = [
+                _row_to_record(
+                    r, profiles=profiles,
+                    has_grant=False,
+                    class_journal=None,
+                    scheduled_notification=None,
+                ) for r in rows
+            ]
         else:
-            conn.execute('UPDATE contact_books SET original_parent = ?, last_modified = ? WHERE student_id = ? AND date = ?',
-                         (json.dumps(data, ensure_ascii=False), datetime.now().isoformat(), student_id, date))
+            grant_rows = grant_service.get_visible_grants_for_student(
+                conn, student_id, class_name=class_name,
+            )
+            # latest grants first
+            grant_rows = sorted(grant_rows, key=lambda g: g['date'], reverse=True)[:limit]
+            dates = [g['date'] for g in grant_rows]
+            grant_dates = set(dates)
+            row_map = {}
+            if dates:
+                placeholders = ','.join('?' for _ in dates)
+                row_query = conn.execute(
+                    f'SELECT * FROM contact_books WHERE student_id = ? AND date IN ({placeholders})',
+                    (student_id, *dates),
+                ).fetchall()
+                row_map = {r['date']: r for r in row_query}
+            # journal map (date_like restricted by min-max date)
+            journal_map = {}
+            if class_name and dates:
+                jrows = conn.execute(
+                    f'SELECT date, content_blocks, edited_by, updated_at, semester '
+                    f'FROM class_journals WHERE class_name = ? AND date IN ({placeholders})',
+                    (class_name, *dates),
+                ).fetchall()
+                for jr in jrows:
+                    journal_map[jr['date']] = {
+                        'semester': jr['semester'],
+                        'contentBlocks': load_json(jr['content_blocks']) or [],
+                        'editedBy': _enrich_edited_by(load_json(jr['edited_by']), profiles),
+                        'updatedAt': jr['updated_at'],
+                    }
+            records = []
+            for date_str in dates:
+                rec = _row_to_record(
+                    row_map.get(date_str), profiles=profiles,
+                    has_grant=date_str in grant_dates,
+                    class_journal=journal_map.get(date_str),
+                    scheduled_notification=None,
+                )
+                rec['date'] = date_str
+                rec['dayOfWeek'] = _day_of_week(date_str)
+                records.append(rec)
+        return jsonify(records), 200
+    finally:
+        conn.close()
+
+
+# ──────────────────────────────────────────────────────────
+# PUT /<student_id>/<date>/parent
+# ──────────────────────────────────────────────────────────
+
+@contact_book_bp.route('/<student_id>/<date>/parent', methods=['PUT'])
+def update_parent_entry(student_id, date):
+    data = request.get_json() or {}
+    conn = data_service.get_db()
+    try:
+        _ensure_contact_book_row(conn, student_id, date)
+        conn.execute(
+            'UPDATE contact_books SET original_parent = ?, last_modified = ? '
+            'WHERE student_id = ? AND date = ?',
+            (json.dumps(data, ensure_ascii=False), datetime.now().isoformat(), student_id, date),
+        )
         conn.commit()
         return jsonify({'status': 'updated'}), 200
     except Exception as e:
@@ -490,15 +540,20 @@ def update_parent_entry(student_id, date):
     finally:
         conn.close()
 
+
+# ──────────────────────────────────────────────────────────
+# PUT /<student_id>/<date>/teacher  (single-student save)
+# ──────────────────────────────────────────────────────────
+
 @contact_book_bp.route('/<student_id>/<date>/teacher', methods=['PUT'])
 def update_teacher_entry(student_id, date):
+    """Save teacher personal note. No longer touches any 'status' field —
+    visibility is determined solely by class_notification_grants."""
     data = dict(request.get_json() or {})
-    year, month, day = map(int, date.split('-'))
-    
-    # Extract fields that have their own DB columns (not stored inside teacher JSON)
+    year, month, _day = map(int, date.split('-'))
+
     survey_id = data.pop('surveyId', None) or None
-    
-    # Extract editedBy — store only userId + timestamp (names resolved via teacher_profiles)
+
     edited_by_raw = data.pop('editedBy', None)
     if edited_by_raw:
         edited_by = json.dumps({
@@ -507,44 +562,46 @@ def update_teacher_entry(student_id, date):
         }, ensure_ascii=False)
     else:
         edited_by = None
-    
-    # itemsToBring: frontend sends plain array like ["水壺", "餐具"]
-    # DB stores as {"items": [...], "checkedItems": [...], "checkedAt": ...}
+
     raw_items = data.pop('itemsToBring', None)
-    if raw_items and isinstance(raw_items, list) and len(raw_items) > 0:
-        items_to_bring = json.dumps({'items': raw_items}, ensure_ascii=False)
-    else:
-        items_to_bring = None
-    
-    # returnedItems: stored as plain JSON array
+    items_to_bring = (
+        json.dumps({'items': raw_items}, ensure_ascii=False)
+        if isinstance(raw_items, list) and raw_items else None
+    )
+
     raw_returned = data.pop('returnedItems', None)
-    if raw_returned and isinstance(raw_returned, list) and len(raw_returned) > 0:
-        returned_items = json.dumps(raw_returned, ensure_ascii=False)
-    else:
-        returned_items = None
-    
-    # attachedItems: also stored separately
+    returned_items = (
+        json.dumps(raw_returned, ensure_ascii=False)
+        if isinstance(raw_returned, list) and raw_returned else None
+    )
+
     raw_attached = data.pop('attachedItems', None)
     attached_items = json.dumps(raw_attached, ensure_ascii=False) if raw_attached else None
-    
+
     data = normalize_teacher_payload(data)
     conn = data_service.get_db()
     try:
         row = conn.execute(
-            '''SELECT id, status, notified_at, read_at, signed_at, original_teacher,
-                      items_to_bring, returned_items, attached_items, survey_id
+            '''SELECT id, original_teacher, items_to_bring, returned_items,
+                      attached_items, survey_id
                FROM contact_books WHERE student_id = ? AND date = ?''',
-            (student_id, date)
+            (student_id, date),
         ).fetchone()
+        now = datetime.now().isoformat()
         if not row:
-            conn.execute('''
-                INSERT INTO contact_books (student_id, date, year, month, status, original_teacher,
-                    items_to_bring, returned_items, attached_items, survey_id, edited_by, last_modified)
-                VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?)
-            ''', (student_id, date, year, month, json.dumps(data, ensure_ascii=False),
-                  items_to_bring, returned_items, attached_items, survey_id, edited_by, datetime.now().isoformat()))
+            conn.execute(
+                '''
+                INSERT INTO contact_books (
+                    student_id, date, year, month, original_teacher,
+                    items_to_bring, returned_items, attached_items, survey_id,
+                    edited_by, last_modified
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (student_id, date, year, month, json.dumps(data, ensure_ascii=False),
+                 items_to_bring, returned_items, attached_items, survey_id, edited_by, now),
+            )
         else:
-            data, preserved_existing_content = merge_existing_visible_content_if_empty(
+            merged, preserved = merge_existing_visible_content_if_empty(
                 data,
                 load_json(row['original_teacher']) or {},
                 items_to_bring=raw_items,
@@ -552,7 +609,7 @@ def update_teacher_entry(student_id, date):
                 attached_items=raw_attached,
                 survey_id=survey_id,
             )
-            if preserved_existing_content:
+            if preserved:
                 if items_to_bring is None:
                     items_to_bring = row['items_to_bring']
                 if returned_items is None:
@@ -561,26 +618,16 @@ def update_teacher_entry(student_id, date):
                     attached_items = row['attached_items']
                 if survey_id is None:
                     survey_id = row['survey_id']
-
-            # Don't downgrade status if already notified/read/signed
-            current_status = _canonical_contact_book_status(
-                row['status'],
-                row['notified_at'],
-                row['read_at'],
-                row['signed_at'],
+            conn.execute(
+                '''UPDATE contact_books SET original_teacher = ?, items_to_bring = ?,
+                   returned_items = ?, attached_items = ?, survey_id = ?,
+                   edited_by = ?, last_modified = ?
+                   WHERE student_id = ? AND date = ?''',
+                (json.dumps(merged, ensure_ascii=False), items_to_bring,
+                 returned_items, attached_items, survey_id, edited_by, now,
+                 student_id, date),
             )
-            new_status = current_status if current_status in (STATUS_NOTIFIED, STATUS_READ, STATUS_SIGNED) else STATUS_DRAFT
-            conn.execute('''UPDATE contact_books SET original_teacher = ?, items_to_bring = ?,
-                returned_items = ?, attached_items = ?, survey_id = ?, edited_by = ?, status = ?, last_modified = ?
-                WHERE student_id = ? AND date = ?''',
-                (json.dumps(data, ensure_ascii=False), items_to_bring, returned_items,
-                 attached_items, survey_id, edited_by, new_status, datetime.now().isoformat(), student_id, date))
         conn.commit()
-
-        # Note: parent notification is no longer sent immediately on teacher save.
-        # Teachers use the batch notification endpoint (/api/notifications/send-batch)
-        # or scheduled notifications to notify parents after completing the whole class.
-
         return jsonify({'status': 'updated'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -588,182 +635,90 @@ def update_teacher_entry(student_id, date):
         conn.close()
 
 
-@contact_book_bp.route('/<student_id>/<date>/publish', methods=['POST'])
-def publish_student_contact_book(student_id, date):
-    """Publish one student's contact book immediately or schedule it for dismissal time."""
-    data = request.json or {}
-    mode = (data.get('mode') or 'immediate').strip().lower()
-    class_name = data.get('className') or ''
-    student_name = data.get('studentName') or ''
-    sent_by = data.get('sentBy') or ''
-
-    try:
-        if mode == 'dismissal':
-            result = schedule_contact_book_dismissal_publish(
-                data_service,
-                student_id,
-                date,
-                class_name=class_name,
-                student_name=student_name,
-                sent_by=sent_by,
-            )
-        elif mode == 'immediate':
-            result = publish_contact_book_now(
-                data_service,
-                student_id,
-                date,
-                class_name=class_name,
-                student_name=student_name,
-                sent_by=sent_by,
-            )
-        else:
-            return jsonify({'error': 'mode must be immediate or dismissal'}), 400
-        return jsonify(result), 200
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@contact_book_bp.route('/<student_id>/<date>/publish-schedule', methods=['DELETE'])
-def cancel_student_contact_book_publish_schedule(student_id, date):
-    """Cancel a pending dismissal publish for one student's contact book."""
-    try:
-        return jsonify(cancel_scheduled_contact_book_publish(data_service, student_id, date)), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@contact_book_bp.route('/<student_id>/<date>/publish-events', methods=['GET'])
-def get_student_contact_book_publish_events(student_id, date):
-    """Return recent publish transition/delivery events for diagnostics."""
-    limit = min(max(request.args.get('limit', 20, type=int), 1), 100)
-    conn = data_service.get_db()
-    try:
-        return jsonify({
-            'studentId': student_id,
-            'date': date,
-            'events': get_publish_events(conn, student_id, date, limit=limit),
-        }), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        conn.close()
-
-
-@contact_book_bp.route('/<student_id>/latest', methods=['GET'])
-def get_latest_records(student_id):
-    limit = request.args.get('limit', 10, type=int)
-    conn = data_service.get_db()
-    try:
-        profiles = _load_teacher_profiles(conn)
-        include_unpublished = _is_truthy_flag(request.args.get('includeUnpublished'))
-        if include_unpublished:
-            rows = conn.execute(
-                'SELECT * FROM contact_books WHERE student_id = ? ORDER BY date DESC LIMIT ?',
-                (student_id, limit)
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                '''
-                SELECT *
-                FROM contact_books
-                WHERE student_id = ?
-                  AND (
-                    status IN ('notified', 'read', 'signed')
-                    OR notified_at IS NOT NULL
-                    OR read_at IS NOT NULL
-                    OR signed_at IS NOT NULL
-                  )
-                ORDER BY date DESC
-                LIMIT ?
-                ''',
-                (student_id, limit)
-            ).fetchall()
-        schedule_map = get_pending_schedule_map(conn, student_id, [r['date'] for r in rows])
-        records = [
-            format_record(r, 'original', profiles, schedule_map.get(r['date']))
-            for r in rows
-        ]
-        return jsonify(records), 200
-    finally:
-        conn.close()
+# ──────────────────────────────────────────────────────────
+# PUT /<student_id>/<date>/read
+# ──────────────────────────────────────────────────────────
 
 @contact_book_bp.route('/<student_id>/<date>/read', methods=['PUT'])
 def mark_as_read(student_id, date):
-    data = request.json or {}
+    """Parent acknowledges they've seen the contact book.
+    Auto-creates a contact_books row if none exists (sparse-table)."""
+    data = request.get_json() or {}
     conn = data_service.get_db()
     try:
+        _ensure_contact_book_row(conn, student_id, date)
         row = conn.execute(
-            'SELECT status, notified_at, read_at, signed_at FROM contact_books WHERE student_id = ? AND date = ?',
-            (student_id, date)
+            'SELECT read_at, signed_at FROM contact_books WHERE student_id = ? AND date = ?',
+            (student_id, date),
         ).fetchone()
-        if not row:
-            return jsonify({'error': 'Record not found'}), 404
-        
-        status_changed = False
-        current_status = _canonical_contact_book_status(
-            row['status'],
-            row['notified_at'],
-            row['read_at'],
-            row['signed_at'],
+        # Don't downgrade: if already signed, leave it alone
+        if row['signed_at'] or row['read_at']:
+            return jsonify({'status': 'noop'}), 200
+
+        read_at = data.get('readAt') or datetime.now().isoformat()
+        conn.execute(
+            'UPDATE contact_books SET read_at = ?, last_modified = ? '
+            'WHERE student_id = ? AND date = ?',
+            (read_at, datetime.now().isoformat(), student_id, date),
         )
-        if current_status == STATUS_NOTIFIED:
-            read_at = data.get('readAt') or datetime.now().isoformat()
-            conn.execute('UPDATE contact_books SET status = ?, read_at = ?, last_modified = ? WHERE student_id = ? AND date = ?',
-                         (STATUS_READ, read_at, datetime.now().isoformat(), student_id, date))
-            student_name = data.get('studentName') or student_id
-            enqueue_push_job(
-                conn,
-                EVENT_CONTACT_BOOK_TEACHER_STATUS,
-                'student_teachers',
-                recipient_id=student_id,
-                payload={
-                    'studentId': student_id,
-                    'studentName': student_name,
-                    'date': date,
-                    'status': 'read',
-                },
-                idempotency_key=f'contact_book_status:{student_id}:{date}:read:{read_at}',
-            )
-            conn.commit()
-            status_changed = True
-        
+        student_name = data.get('studentName') or student_id
+        enqueue_push_job(
+            conn,
+            EVENT_CONTACT_BOOK_TEACHER_STATUS,
+            'student_teachers',
+            recipient_id=student_id,
+            payload={
+                'studentId': student_id,
+                'studentName': student_name,
+                'date': date,
+                'status': 'read',
+            },
+            idempotency_key=f'contact_book_status:{student_id}:{date}:read:{read_at}',
+        )
+        conn.commit()
         return jsonify({'status': 'updated'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
 
+
+# ──────────────────────────────────────────────────────────
+# PUT /<student_id>/<date>/sign
+# ──────────────────────────────────────────────────────────
+
 @contact_book_bp.route('/<student_id>/<date>/sign', methods=['PUT'])
 def mark_as_signed(student_id, date):
-    data = request.json or {}
+    """Parent signs the contact book.
+    Auto-creates a contact_books row if none exists (sparse-table)."""
+    data = request.get_json() or {}
     conn = data_service.get_db()
     try:
-        row = conn.execute('SELECT original_parent FROM contact_books WHERE student_id = ? AND date = ?', (student_id, date)).fetchone()
-        if not row:
-            return jsonify({'error': 'Record not found'}), 404
+        _ensure_contact_book_row(conn, student_id, date)
+        row = conn.execute(
+            'SELECT original_parent FROM contact_books WHERE student_id = ? AND date = ?',
+            (student_id, date),
+        ).fetchone()
 
         signed_at = data.get('signedAt') or datetime.now().isoformat()
-        signature_url = data.get('signatureUrl')  # WebP URL from image server; may be None for legacy callers
+        signature_url = data.get('signatureUrl')
 
-        # Update parent note if provided
         if data.get('note'):
             parent_obj = load_json(row['original_parent']) or {}
             parent_obj['note'] = data['note']
             parent_obj['updatedAt'] = signed_at
-            new_parent_data = json.dumps(parent_obj, ensure_ascii=False)
-
             conn.execute(
-                'UPDATE contact_books SET status = ?, signed_at = ?, original_parent = ?, parent_signature_url = ?, last_modified = ? '
+                'UPDATE contact_books SET signed_at = ?, original_parent = ?, '
+                'parent_signature_url = ?, last_modified = ? '
                 'WHERE student_id = ? AND date = ?',
-                ('signed', signed_at, new_parent_data, signature_url, datetime.now().isoformat(), student_id, date),
+                (signed_at, json.dumps(parent_obj, ensure_ascii=False),
+                 signature_url, datetime.now().isoformat(), student_id, date),
             )
         else:
             conn.execute(
-                'UPDATE contact_books SET status = ?, signed_at = ?, parent_signature_url = ?, last_modified = ? '
-                'WHERE student_id = ? AND date = ?',
-                ('signed', signed_at, signature_url, datetime.now().isoformat(), student_id, date),
+                'UPDATE contact_books SET signed_at = ?, parent_signature_url = ?, '
+                'last_modified = ? WHERE student_id = ? AND date = ?',
+                (signed_at, signature_url, datetime.now().isoformat(), student_id, date),
             )
         student_name = data.get('studentName', student_id)
         enqueue_push_job(
@@ -780,28 +735,37 @@ def mark_as_signed(student_id, date):
             idempotency_key=f'contact_book_status:{student_id}:{date}:signed:{signed_at}',
         )
         conn.commit()
-        
         return jsonify({'status': 'signed'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
 
+
+# ──────────────────────────────────────────────────────────
+# PUT /<student_id>/<date>/items-checked
+# ──────────────────────────────────────────────────────────
+
 @contact_book_bp.route('/<student_id>/<date>/items-checked', methods=['PUT'])
 def update_items_checked(student_id, date):
-    data = request.json or {}
+    data = request.get_json() or {}
     conn = data_service.get_db()
     try:
-        row = conn.execute('SELECT items_to_bring FROM contact_books WHERE student_id = ? AND date = ?', (student_id, date)).fetchone()
+        row = conn.execute(
+            'SELECT items_to_bring FROM contact_books WHERE student_id = ? AND date = ?',
+            (student_id, date),
+        ).fetchone()
         if not row:
             return jsonify({'error': 'Record not found'}), 404
-        
         items_obj = load_json(row['items_to_bring']) or {}
         items_obj['checkedItems'] = data.get('checkedItems', [])
         items_obj['checkedAt'] = data.get('checkedAt') or datetime.now().isoformat()
-        
-        conn.execute('UPDATE contact_books SET items_to_bring = ?, last_modified = ? WHERE student_id = ? AND date = ?',
-                     (json.dumps(items_obj, ensure_ascii=False), datetime.now().isoformat(), student_id, date))
+        conn.execute(
+            'UPDATE contact_books SET items_to_bring = ?, last_modified = ? '
+            'WHERE student_id = ? AND date = ?',
+            (json.dumps(items_obj, ensure_ascii=False), datetime.now().isoformat(),
+             student_id, date),
+        )
         conn.commit()
         return jsonify({'status': 'updated'}), 200
     except Exception as e:
@@ -809,113 +773,109 @@ def update_items_checked(student_id, date):
     finally:
         conn.close()
 
+
+# ──────────────────────────────────────────────────────────
+# Comments
+# ──────────────────────────────────────────────────────────
+
 @contact_book_bp.route('/<student_id>/<date>/comments', methods=['GET', 'POST'])
 def handle_comments(student_id, date):
     conn = data_service.get_db()
     try:
-        row = conn.execute('SELECT comments FROM contact_books WHERE student_id = ? AND date = ?', (student_id, date)).fetchone()
-        if not row:
-            return jsonify({'error': 'Record not found'}), 404
-            
-        comments = load_json(row['comments']) or []
+        if request.method == 'POST':
+            data = request.get_json() or {}
+            if not data.get('content'):
+                return jsonify({'error': 'Content is required'}), 400
+
+            # Posting a comment may auto-create the row (parents can comment
+            # even if no teacher data exists yet — sparse table)
+            _ensure_contact_book_row(conn, student_id, date)
+
+        row = conn.execute(
+            'SELECT comments FROM contact_books WHERE student_id = ? AND date = ?',
+            (student_id, date),
+        ).fetchone()
+        if not row and request.method == 'GET':
+            return jsonify([]), 200
+        comments = load_json(row['comments']) if row else []
+        comments = comments or []
 
         if request.method == 'GET':
-            # Resolve teacher names in comments
             profiles = _load_teacher_profiles(conn)
-            for c in comments:
-                sid = c.get('senderId', '')
-                if sid and sid != 'parent' and profiles:
-                    tp = profiles.get(sid, {})
-                    c['cname'] = tp.get('cname', '')
-                    c['ename'] = tp.get('ename', '')
-            return jsonify(comments), 200
-            
-        elif request.method == 'POST':
-            data = request.json
-            if not data or not data.get('content'):
-                return jsonify({'error': 'Content is required'}), 400
-            
-            now_iso = datetime.now().isoformat()
-            sender_role = data.get('senderRole', 'parent')
-            # For teachers: store userId as senderId (names resolved on read via teacher_profiles)
-            # For parents: store 'parent' as senderId, name from data
-            sender_id = data.get('senderId', 'parent')
-            comment = {
-                'id': f"{student_id}_{date}_{datetime.now().timestamp():.6f}",
-                'senderId': sender_id,
-                'senderRole': sender_role,
-                'content': data['content'],
-                'createdAt': now_iso,
-            }
-            # Only store name/userId for parents (teacher names resolved dynamically)
-            if sender_role == 'parent':
-                comment['name'] = data.get('name', '家長')
-                if data.get('userId'):
-                    comment['userId'] = data['userId']
-                    # Upsert profile in background (fetches blob if pictureUrl changed)
-                    threading.Thread(
-                        target=_upsert_parent_profile,
-                        args=(data['userId'], data.get('name', '家長'), data.get('pictureUrl', '')),
-                        daemon=True
-                    ).start()
-            comments.append(comment)
+            return jsonify(_enrich_comments(comments, profiles)), 200
 
-            conn.execute('UPDATE contact_books SET comments = ?, last_modified = ? WHERE student_id = ? AND date = ?',
-                         (json.dumps(comments, ensure_ascii=False), now_iso, student_id, date))
+        # POST
+        data = request.get_json() or {}
+        now_iso = datetime.now().isoformat()
+        sender_role = data.get('senderRole', 'parent')
+        sender_id = data.get('senderId', 'parent')
+        comment = {
+            'id': f"{student_id}_{date}_{datetime.now().timestamp():.6f}",
+            'senderId': sender_id,
+            'senderRole': sender_role,
+            'content': data['content'],
+            'createdAt': now_iso,
+        }
+        if sender_role == 'parent':
+            comment['name'] = data.get('name', '家長')
+            if data.get('userId'):
+                comment['userId'] = data['userId']
+                threading.Thread(
+                    target=_upsert_parent_profile,
+                    args=(data['userId'], data.get('name', '家長'), data.get('pictureUrl', '')),
+                    daemon=True,
+                ).start()
+        comments.append(comment)
+        conn.execute(
+            'UPDATE contact_books SET comments = ?, last_modified = ? '
+            'WHERE student_id = ? AND date = ?',
+            (json.dumps(comments, ensure_ascii=False), now_iso, student_id, date),
+        )
 
-            # Resolve teacher name for notification push text
-            profiles = _load_teacher_profiles(conn)
-            if sender_role in ('teacher', 'admin'):
-                tp = profiles.get(sender_id, {})
-                sender_display = tp.get('ename') or tp.get('cname') or '老師'
-            else:
-                sender_display = data.get('name', '家長')
+        profiles = _load_teacher_profiles(conn)
+        if sender_role in ('teacher', 'admin'):
+            tp = profiles.get(sender_id, {})
+            sender_display = tp.get('ename') or tp.get('cname') or '老師'
+            comment['cname'] = tp.get('cname', '')
+            comment['ename'] = tp.get('ename', '')
+        else:
+            sender_display = data.get('name', '家長')
 
-            # Enrich returned comment with resolved names
-            if sender_role in ('teacher', 'admin'):
-                tp = profiles.get(sender_id, {})
-                comment['cname'] = tp.get('cname', '')
-                comment['ename'] = tp.get('ename', '')
-
-            content_preview = comment['content']
-            student_name = data.get('studentName') or student_id
-
-            if sender_role in ('teacher', 'admin'):
-                enqueue_push_job(
-                    conn,
-                    EVENT_CONTACT_BOOK_PARENT_COMMENT,
-                    'student_parents',
-                    recipient_id=student_id,
-                    payload={
-                        'studentId': student_id,
-                        'studentName': student_name,
-                        'senderName': sender_display,
-                        'content': content_preview,
-                        'date': date,
-                    },
-                    idempotency_key=f'contact_book_comment_parent:{comment["id"]}',
-                    pref_column='contact_book_notify',
-                )
-            else:
-                enqueue_push_job(
-                    conn,
-                    EVENT_CONTACT_BOOK_TEACHER_COMMENT,
-                    'student_teachers',
-                    recipient_id=student_id,
-                    payload={
-                        'studentId': student_id,
-                        'studentName': student_name,
-                        'senderName': sender_display,
-                        'content': content_preview,
-                        'date': date,
-                    },
-                    idempotency_key=f'contact_book_comment_teacher:{comment["id"]}',
-                )
-
-            conn.commit()
-
-            return jsonify(comment), 201
-            
+        content_preview = comment['content']
+        student_name = data.get('studentName') or student_id
+        if sender_role in ('teacher', 'admin'):
+            enqueue_push_job(
+                conn,
+                EVENT_CONTACT_BOOK_PARENT_COMMENT,
+                'student_parents',
+                recipient_id=student_id,
+                payload={
+                    'studentId': student_id,
+                    'studentName': student_name,
+                    'senderName': sender_display,
+                    'content': content_preview,
+                    'date': date,
+                },
+                idempotency_key=f'contact_book_comment_parent:{comment["id"]}',
+                pref_column='contact_book_notify',
+            )
+        else:
+            enqueue_push_job(
+                conn,
+                EVENT_CONTACT_BOOK_TEACHER_COMMENT,
+                'student_teachers',
+                recipient_id=student_id,
+                payload={
+                    'studentId': student_id,
+                    'studentName': student_name,
+                    'senderName': sender_display,
+                    'content': content_preview,
+                    'date': date,
+                },
+                idempotency_key=f'contact_book_comment_teacher:{comment["id"]}',
+            )
+        conn.commit()
+        return jsonify(comment), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
@@ -924,15 +884,9 @@ def handle_comments(student_id, date):
 
 @contact_book_bp.route('/<student_id>/<date>/comments/<comment_id>', methods=['PATCH'])
 def edit_comment(student_id, date, comment_id):
-    """
-    Edit the content of a single comment identified by comment_id.
-    Matching order: comment['id'], comment['content'], comment['createdAt'].
-    Body: { "content": "new text" }
-    Returns the updated comment on success, 404 if not found.
-    """
     comment_id = unquote(comment_id)
-    body = request.get_json()
-    if not body or 'content' not in body:
+    body = request.get_json() or {}
+    if 'content' not in body:
         return jsonify({'error': 'Missing content'}), 400
     new_content = body['content'].strip()
     if not new_content:
@@ -942,18 +896,17 @@ def edit_comment(student_id, date, comment_id):
     try:
         row = conn.execute(
             'SELECT comments FROM contact_books WHERE student_id = ? AND date = ?',
-            (student_id, date)
+            (student_id, date),
         ).fetchone()
         if not row:
             return jsonify({'error': 'Record not found'}), 404
-
         comments = load_json(row['comments']) or []
 
         def _matches(c):
             return (
-                c.get('id') == comment_id or
-                c.get('content') == comment_id or
-                c.get('createdAt') == comment_id
+                c.get('id') == comment_id
+                or c.get('content') == comment_id
+                or c.get('createdAt') == comment_id
             )
 
         updated_comment = None
@@ -970,12 +923,13 @@ def edit_comment(student_id, date, comment_id):
             return jsonify({'error': 'Comment not found'}), 404
 
         conn.execute(
-            'UPDATE contact_books SET comments = ?, last_modified = ? WHERE student_id = ? AND date = ?',
-            (json.dumps(updated_comments, ensure_ascii=False), datetime.now().isoformat(), student_id, date)
+            'UPDATE contact_books SET comments = ?, last_modified = ? '
+            'WHERE student_id = ? AND date = ?',
+            (json.dumps(updated_comments, ensure_ascii=False),
+             datetime.now().isoformat(), student_id, date),
         )
         conn.commit()
         return jsonify(updated_comment), 200
-
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
@@ -984,58 +938,47 @@ def edit_comment(student_id, date, comment_id):
 
 @contact_book_bp.route('/<student_id>/<date>/comments/<comment_id>', methods=['DELETE'])
 def delete_comment(student_id, date, comment_id):
-    """
-    Delete a single comment identified by comment_id.
-    Matching order:
-      1. comment['id'] == comment_id         (new comments with server-assigned id)
-      2. comment['content'] == comment_id    (old image comments identified by URL)
-      3. comment['createdAt'] == comment_id  (legacy fallback by timestamp)
-    Returns 200 on success, 404 if the record or comment is not found.
-    """
-    # Decode percent-encoding (e.g. %2F → /) for URL-as-id fallback
     comment_id = unquote(comment_id)
     conn = data_service.get_db()
     try:
         row = conn.execute(
             'SELECT comments FROM contact_books WHERE student_id = ? AND date = ?',
-            (student_id, date)
+            (student_id, date),
         ).fetchone()
         if not row:
             return jsonify({'error': 'Record not found'}), 404
-
         comments = load_json(row['comments']) or []
         original_len = len(comments)
 
         def _matches(c):
             return (
-                c.get('id') == comment_id or
-                c.get('content') == comment_id or
-                c.get('createdAt') == comment_id
+                c.get('id') == comment_id
+                or c.get('content') == comment_id
+                or c.get('createdAt') == comment_id
             )
 
         deleted = [c for c in comments if _matches(c)]
         filtered = [c for c in comments if not _matches(c)]
-
         if len(filtered) == original_len:
-            # Nothing was removed
             return jsonify({'error': 'Comment not found'}), 404
 
-        # Capture info before committing — needed for notification and cache eviction
         deleted_content = deleted[0].get('content', '') if deleted else ''
         deleted_sender_name = deleted[0].get('name', '家長') if deleted else '家長'
         deleted_sender_role = deleted[0].get('senderRole', 'parent') if deleted else 'parent'
         is_deleted_image = (
             isinstance(deleted_content, str) and (
-                deleted_content.startswith('https://firebasestorage.googleapis.com') or
-                deleted_content.startswith('https://storage.googleapis.com') or
-                deleted_content.startswith('https://imageserver.wentzao.com')
+                deleted_content.startswith('https://firebasestorage.googleapis.com')
+                or deleted_content.startswith('https://storage.googleapis.com')
+                or deleted_content.startswith('https://imageserver.wentzao.com')
             )
         )
         deleted_image_url = deleted_content if is_deleted_image else ''
 
         conn.execute(
-            'UPDATE contact_books SET comments = ?, last_modified = ? WHERE student_id = ? AND date = ?',
-            (json.dumps(filtered, ensure_ascii=False), datetime.now().isoformat(), student_id, date)
+            'UPDATE contact_books SET comments = ?, last_modified = ? '
+            'WHERE student_id = ? AND date = ?',
+            (json.dumps(filtered, ensure_ascii=False), datetime.now().isoformat(),
+             student_id, date),
         )
         if deleted_sender_role == 'teacher':
             enqueue_push_job(
@@ -1066,28 +1009,28 @@ def delete_comment(student_id, date, comment_id):
                 idempotency_key=f'contact_book_comment_deleted_teacher:{student_id}:{date}:{comment_id}',
             )
         conn.commit()
-
         return jsonify({'status': 'deleted', 'remaining': len(filtered)}), 200
-
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
 
 
-# ── Batch endpoints for journal editor ──
+# ──────────────────────────────────────────────────────────
+# Batch teacher save (journal editor auto-save)
+# ──────────────────────────────────────────────────────────
 
 @contact_book_bp.route('/batch/<class_name>/<date>/teacher', methods=['PUT'])
 def batch_save_teacher(class_name, date):
-    """Batch save teacher entries for multiple students (from journal editor auto-save).
-    Sets status to 'draft' (not visible to parents until notified)."""
-    body = request.get_json()
-    if not body or 'students' not in body:
+    """Batch save teacher entries for multiple students. No status mutation —
+    visibility is owned by grants."""
+    body = request.get_json() or {}
+    if 'students' not in body:
         return jsonify({'error': 'Missing students data'}), 400
 
     students_data = body['students']
     edited_by_raw = body.get('editedBy')
-    last_known_modified = body.get('lastModified', {})  # { studentId: "ISO timestamp" }
+    last_known_modified = body.get('lastModified', {})
     edited_by = None
     if edited_by_raw:
         edited_by = json.dumps({
@@ -1104,89 +1047,80 @@ def batch_save_teacher(class_name, date):
         conflicts = {}
         for student_id, raw_note_data in students_data.items():
             note_data = normalize_teacher_payload(dict(raw_note_data or {}))
-            # Optimistic lock: check per-student lastModified
             known = last_known_modified.get(student_id)
             if known:
                 row_check = conn.execute(
                     'SELECT last_modified, edited_by FROM contact_books WHERE student_id = ? AND date = ?',
-                    (student_id, date)
+                    (student_id, date),
                 ).fetchone()
                 if row_check and row_check['last_modified'] and row_check['last_modified'] != known:
                     conflicts[student_id] = {
                         'serverModified': row_check['last_modified'],
                         'editedBy': json.loads(row_check['edited_by']) if row_check['edited_by'] else None,
                     }
-                    continue  # Skip this student, don't overwrite
+                    continue
 
-            # Extract fields that have their own DB columns
             raw_items = note_data.pop('itemsToBring', None)
-            if raw_items and isinstance(raw_items, list) and len(raw_items) > 0:
-                items_to_bring = json.dumps({'items': raw_items}, ensure_ascii=False)
-            else:
-                items_to_bring = None
-
+            items_to_bring = (
+                json.dumps({'items': raw_items}, ensure_ascii=False)
+                if isinstance(raw_items, list) and raw_items else None
+            )
             raw_returned = note_data.pop('returnedItems', None)
-            if raw_returned and isinstance(raw_returned, list) and len(raw_returned) > 0:
-                returned_items = json.dumps(raw_returned, ensure_ascii=False)
-            else:
-                returned_items = None
-
+            returned_items = (
+                json.dumps(raw_returned, ensure_ascii=False)
+                if isinstance(raw_returned, list) and raw_returned else None
+            )
             survey_id = note_data.pop('surveyId', None) or None
             teacher_json = json.dumps(note_data, ensure_ascii=False)
 
             row = conn.execute(
-                '''SELECT id, status, notified_at, read_at, signed_at, original_teacher,
-                          items_to_bring, returned_items, survey_id
+                '''SELECT id, original_teacher, items_to_bring, returned_items, survey_id
                    FROM contact_books WHERE student_id = ? AND date = ?''',
-                (student_id, date)
+                (student_id, date),
             ).fetchone()
 
+            now = datetime.now().isoformat()
             if not row:
-                conn.execute('''
-                    INSERT INTO contact_books (student_id, date, year, month, status, original_teacher,
-                        items_to_bring, returned_items, survey_id, edited_by, last_modified)
-                    VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)
-                ''', (student_id, date, year, month, teacher_json,
-                      items_to_bring, returned_items, survey_id, edited_by, datetime.now().isoformat()))
+                conn.execute(
+                    '''
+                    INSERT INTO contact_books (
+                        student_id, date, year, month, original_teacher,
+                        items_to_bring, returned_items, survey_id, edited_by, last_modified
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''',
+                    (student_id, date, year, month, teacher_json,
+                     items_to_bring, returned_items, survey_id, edited_by, now),
+                )
             else:
-                note_data, preserved_existing_content = merge_existing_visible_content_if_empty(
+                merged, preserved = merge_existing_visible_content_if_empty(
                     note_data,
                     load_json(row['original_teacher']) or {},
                     items_to_bring=raw_items,
                     returned_items=raw_returned,
                     survey_id=survey_id,
                 )
-                if preserved_existing_content:
+                if preserved:
                     if items_to_bring is None:
                         items_to_bring = row['items_to_bring']
                     if returned_items is None:
                         returned_items = row['returned_items']
                     if survey_id is None:
                         survey_id = row['survey_id']
-                teacher_json = json.dumps(note_data, ensure_ascii=False)
-
-                # Don't downgrade status if already notified/read/signed
-                current_status = _canonical_contact_book_status(
-                    row['status'],
-                    row['notified_at'],
-                    row['read_at'],
-                    row['signed_at'],
+                teacher_json = json.dumps(merged, ensure_ascii=False)
+                conn.execute(
+                    '''UPDATE contact_books SET original_teacher = ?, items_to_bring = ?,
+                       returned_items = ?, survey_id = ?, edited_by = ?, last_modified = ?
+                       WHERE student_id = ? AND date = ?''',
+                    (teacher_json, items_to_bring, returned_items, survey_id,
+                     edited_by, now, student_id, date),
                 )
-                new_status = current_status if current_status in (STATUS_NOTIFIED, STATUS_READ, STATUS_SIGNED) else STATUS_DRAFT
-                conn.execute('''
-                    UPDATE contact_books SET original_teacher = ?, items_to_bring = ?,
-                        returned_items = ?, survey_id = ?, edited_by = ?, status = ?, last_modified = ?
-                    WHERE student_id = ? AND date = ?
-                ''', (teacher_json, items_to_bring, returned_items, survey_id,
-                      edited_by, new_status, datetime.now().isoformat(), student_id, date))
             saved_count += 1
 
-        # Send silent "data_updated" notification for student notes
         if saved_count > 0:
             saved_ids = [sid for sid in students_data.keys() if sid not in conflicts]
             rows = conn.execute(
                 'SELECT DISTINCT user_id FROM teacher_class_memberships WHERE class_name = ?',
-                (class_name,)
+                (class_name,),
             ).fetchall()
             enqueue_push_job(
                 conn,
@@ -1209,7 +1143,6 @@ def batch_save_teacher(class_name, date):
             )
 
         conn.commit()
-
         result = {'status': 'saved', 'count': saved_count}
         if conflicts:
             result['conflicts'] = conflicts
@@ -1220,49 +1153,68 @@ def batch_save_teacher(class_name, date):
         conn.close()
 
 
+# ──────────────────────────────────────────────────────────
+# Admin: clear a date
+# ──────────────────────────────────────────────────────────
+
 @contact_book_bp.route('/admin/clear-date/<date>', methods=['DELETE'])
 def admin_clear_date(date):
-    """Admin: delete all contact_books and class_journals for a given date."""
     conn = data_service.get_db()
     try:
         cb = conn.execute('DELETE FROM contact_books WHERE date = ?', (date,)).rowcount
         cj = conn.execute('DELETE FROM class_journals WHERE date = ?', (date,)).rowcount
+        cg = conn.execute('DELETE FROM class_notification_grants WHERE date = ?', (date,)).rowcount
+        sn = conn.execute('DELETE FROM scheduled_class_notifications WHERE date = ?', (date,)).rowcount
         conn.commit()
-        return jsonify({'deleted': {'contactBooks': cb, 'classJournals': cj}}), 200
+        return jsonify({'deleted': {
+            'contactBooks': cb,
+            'classJournals': cj,
+            'classNotificationGrants': cg,
+            'scheduledClassNotifications': sn,
+        }}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
 
+
+# ──────────────────────────────────────────────────────────
+# GET /class/<class_name>/<date>/teacher
+# ──────────────────────────────────────────────────────────
+
 @contact_book_bp.route('/class/<class_name>/<date>/teacher', methods=['GET'])
 def get_class_date_teacher(class_name, date):
-    """Get all students' contact_book records for a class+date (journal editor load).
-    Returns map: { studentId: { original_teacher fields } }"""
+    """Teacher journal editor: returns flat map { studentId: noteData }.
+    Each noteData includes derived status (from per-student read/sign and
+    whether the grant covers them) and the (class-level) scheduled notification."""
     conn = data_service.get_db()
     try:
-        # Since contact_books doesn't store class_name, fetch ALL records for this date
-        # and let the frontend filter by its student list.
         rows = conn.execute(
-            '''
-            SELECT student_id, original_teacher, items_to_bring, returned_items,
-                   survey_id, status, notified_at, read_at, signed_at
-            FROM contact_books
-            WHERE date = ?
-            ''',
-            (date,)
+            '''SELECT student_id, original_teacher, items_to_bring, returned_items,
+                      survey_id, read_at, signed_at
+               FROM contact_books WHERE date = ?''',
+            (date,),
         ).fetchall()
 
+        grant = grant_service.get_grant(conn, class_name, date)
+        grant_dict = grant_service.serialize_grant(grant)
+        grant_student_ids = set(grant_dict['studentIds']) if grant_dict and not grant_dict.get('cancelledAt') else set()
+
+        sched = conn.execute(
+            '''SELECT * FROM scheduled_class_notifications
+               WHERE class_name = ? AND date = ? AND status = ?
+               ORDER BY send_at DESC, id DESC LIMIT 1''',
+            (class_name, date, grant_service.SCHEDULE_PENDING),
+        ).fetchone()
+        sched_dict = grant_service.serialize_scheduled_notification(sched)
+
         result = {}
-        schedule_map = get_pending_schedule_map_for_date(conn, date)
         for r in rows:
             teacher_data = load_json(r['original_teacher']) or {}
-            teacher_data['status'] = _canonical_contact_book_status(
-                r['status'],
-                r['notified_at'],
-                r['read_at'],
-                r['signed_at'],
+            sid = r['student_id']
+            teacher_data['status'] = _derived_status(
+                r['read_at'], r['signed_at'], sid in grant_student_ids,
             )
-            teacher_data['notifiedAt'] = r['notified_at']
             teacher_data['readAt'] = r['read_at']
             teacher_data['signedAt'] = r['signed_at']
             items = load_json(r['items_to_bring'])
@@ -1273,10 +1225,8 @@ def get_class_date_teacher(class_name, date):
                 teacher_data['returnedItems'] = returned
             if r['survey_id']:
                 teacher_data['surveyId'] = r['survey_id']
-            teacher_data['scheduledNotification'] = serialize_scheduled_notification(
-                schedule_map.get(r['student_id'])
-            )
-            result[r['student_id']] = teacher_data
+            teacher_data['scheduledNotification'] = sched_dict
+            result[sid] = teacher_data
 
         return jsonify(result), 200
     except Exception as e:

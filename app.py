@@ -31,6 +31,7 @@ from routes.news_routes import news_bp
 from routes.auth_routes import auth_bp
 from routes.student_routes import student_bp
 from routes.notification_routes import notification_bp
+from routes.notification_grants_routes import grants_bp
 from routes.class_journal_routes import journal_bp
 from routes.lock_routes import lock_bp
 from routes.parent_routes import parent_bp
@@ -46,6 +47,7 @@ app.register_blueprint(news_bp, url_prefix='/api/news')
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
 app.register_blueprint(student_bp, url_prefix='/api/teacher')
 app.register_blueprint(notification_bp, url_prefix='/api/notifications')
+app.register_blueprint(grants_bp, url_prefix='/api/notifications/grants')
 app.register_blueprint(journal_bp, url_prefix='/api/class-journal')
 app.register_blueprint(lock_bp, url_prefix='/api/locks')
 app.register_blueprint(parent_bp, url_prefix='/api/parents')
